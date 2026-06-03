@@ -212,29 +212,19 @@ function generateMockInvoices(contracts: Contract[]): Invoice[] {
 
     for (let i = 0; i < numInvoices; i++) {
       const nilaiTagihan = Math.floor((contract.nilaiKontrak / numInvoices) * (0.8 + Math.random() * 0.4));
+      const rand = Math.random();
 
       // Determine status based on random and position
-      // Status: diajukan, diterima, ditolak, dibayar
+      // Status: ditolak, dibayar
       let status: InvoiceStatus;
-      if (i < numInvoices - 2) {
-        status = "dibayar";
-      } else if (i === numInvoices - 2) {
-        status = Math.random() > 0.3 ? "diterima" : "dibayar";
-      } else {
-        const rand = Math.random();
-        if (rand < 0.4) status = "diajukan";
-        else if (rand < 0.7) status = "diterima";
-        else if (rand < 0.9) status = "dibayar";
-        else status = "ditolak";
-      }
+      if (rand < 0.8) status = "dibayar";
+      else status = "ditolak";
 
       const tanggalDiajukan = new Date(2025, i * 2, 15 + Math.floor(Math.random() * 10));
       const tahun = tanggalDiajukan.getFullYear();
 
-      // Hitung tanggalVerifikasi jika status bukan diajukan
-      const tanggalVerifikasi = status !== "diajukan"
-        ? new Date(tanggalDiajukan.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
-        : undefined;
+      // Hitung tanggalVerifikasi
+      const tanggalVerifikasi = new Date(tanggalDiajukan.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
       invoices.push({
         id: `INV-${String(invoiceIndex).padStart(4, "0")}`,
@@ -243,11 +233,11 @@ function generateMockInvoices(contracts: Contract[]): Invoice[] {
         nomorTagihan: `BA/${contract.id.replace("CTR-", "")}/${String(i + 1).padStart(2, "0")}/${tahun}`,
         tanggalTagihan: tanggalDiajukan.toISOString().split("T")[0],
         nilaiTagihan,
-        noBeritaAcara: status !== "diajukan" ? `BA-${String(invoiceIndex).padStart(4, "0")}/${tahun}` : undefined,
-        tanggalBeritaAcara: status !== "diajukan" ? new Date(tanggalDiajukan.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString().split("T")[0] : undefined,
+        noBeritaAcara: `BA-${String(invoiceIndex).padStart(4, "0")}/${tahun}`,
+        tanggalBeritaAcara: new Date(tanggalDiajukan.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
         tanggalArsip: status === "dibayar" ? new Date(tanggalDiajukan.getTime() + 20 * 24 * 60 * 60 * 1000).toISOString().split("T")[0] : undefined,
-        noXPS: ["diterima", "dibayar"].includes(status) ? `XPS/${String(invoiceIndex).padStart(4, "0")}/${tahun}` : undefined,
-        tanggalXPS: ["diterima", "dibayar"].includes(status) ? new Date(tanggalDiajukan.getTime() + 10 * 24 * 60 * 60 * 1000).toISOString().split("T")[0] : undefined,
+        noXPS: status === "dibayar" ? `XPS/${String(invoiceIndex).padStart(4, "0")}/${tahun}` : undefined,
+        tanggalXPS: status === "dibayar" ? new Date(tanggalDiajukan.getTime() + 10 * 24 * 60 * 60 * 1000).toISOString().split("T")[0] : undefined,
         status,
         tanggalDiajukan: tanggalDiajukan.toISOString(),
         tanggalVerifikasi,
@@ -305,15 +295,11 @@ export const CONTRACT_CATEGORY_COLORS: Record<ContractCategory, string> = {
 };
 
 export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
-  diajukan: "Diajukan",
-  diterima: "Diterima",
   dibayar: "Dibayar",
   ditolak: "Ditolak",
 };
 
 export const INVOICE_STATUS_COLORS: Record<InvoiceStatus, string> = {
-  diajukan: "bg-amber-200 text-amber-900 font-semibold",
-  diterima: "bg-blue-200 text-blue-900 font-semibold",
   dibayar: "bg-emerald-200 text-emerald-900 font-semibold",
   ditolak: "bg-red-200 text-red-900 font-semibold",
 };
@@ -344,8 +330,6 @@ export const contractCategoryOptions = [
 
 export const invoiceStatusOptions = [
   { value: "all", label: "Semua Status" },
-  { value: "diajukan", label: "Diajukan" },
-  { value: "diterima", label: "Diterima" },
   { value: "dibayar", label: "Dibayar" },
   { value: "ditolak", label: "Ditolak" },
 ];
@@ -370,6 +354,7 @@ interface ContractStoreContextType {
   invoices: Invoice[];
   alerts: Alert[];
   isLoading: boolean;
+  refreshData: (background?: boolean) => Promise<void>;
 
   // Getters
   getContractById: (id: string) => Contract | undefined;
@@ -442,26 +427,8 @@ function generateAlerts(contracts: Contract[], invoices: Invoice[]): Alert[] {
     }
   });
 
-  // Check invoices
+  // Removed tagihan pending alert as diajukan status is removed
   invoices.forEach((invoice) => {
-    // Tagihan pending lebih dari 7 hari
-    if (invoice.status === "diajukan") {
-      const submittedDate = new Date(invoice.tanggalDiajukan);
-      const daysPending = Math.floor((now.getTime() - submittedDate.getTime()) / (1000 * 60 * 60 * 24));
-      if (daysPending > 7) {
-        alerts.push({
-          id: `ALT-${String(alertId++).padStart(4, "0")}`,
-          type: "tagihan_pending_lama",
-          severity: daysPending > 14 ? "critical" : "warning",
-          title: "Tagihan Menunggu Verifikasi",
-          message: `Tagihan "${invoice.nomorTagihan}" sudah ${daysPending} hari menunggu verifikasi.`,
-          contractId: invoice.contractId,
-          invoiceId: invoice.id,
-          createdAt: new Date(now.getTime() - Math.random() * 72 * 60 * 60 * 1000).toISOString(),
-        });
-      }
-    }
-
     // Tagihan ditolak
     if (invoice.status === "ditolak") {
       alerts.push({
@@ -491,11 +458,10 @@ export function ContractStoreProvider({ children }: { children: ReactNode }) {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // LOAD DATA DARI SUPABASE saat pertama kali mount
-  useEffect(() => {
-    async function loadDataFromSupabase() {
+  // LOAD DATA DARI SUPABASE
+  const loadDataFromSupabase = useCallback(async (background = false) => {
       try {
-        setIsLoading(true);
+        if (!background) setIsLoading(true);
 
         // Fetch contracts from new split tables
         const contractsRes = await fetch('/api/contracts');
@@ -577,12 +543,13 @@ export function ContractStoreProvider({ children }: { children: ReactNode }) {
         setContracts(mockContracts);
         setInvoices(generateMockInvoices(mockContracts));
       } finally {
-        setIsLoading(false);
+        if (!background) setIsLoading(false);
       }
-    }
+  }, []);
 
+  useEffect(() => {
     loadDataFromSupabase();
-  }, []); // Run once on mount
+  }, [loadDataFromSupabase]);
 
   // Generate alerts on mount and when contracts/invoices change
   useEffect(() => {
@@ -736,15 +703,13 @@ export function ContractStoreProvider({ children }: { children: ReactNode }) {
       nilaiAdministrasi: kontrakAdministrasi.reduce((sum, c) => sum + c.nilaiKontrak, 0),
 
       totalTagihan: invoices.length,
-      tagihanDiajukan: invoices.filter((inv) => inv.status === "diajukan").length,
-      tagihanDiterima: invoices.filter((inv) => inv.status === "diterima").length,
+      tagihanDiajukan: 0,
+      tagihanDiterima: 0,
       tagihanDibayar: invoices.filter((inv) => inv.status === "dibayar").length,
       tagihanDitolak: invoices.filter((inv) => inv.status === "ditolak").length,
 
       kontrakHampirHabis: activeContracts.filter((c) => c.persentaseRealisasi > 90).length,
-      tagihanPendingLama: invoices.filter(
-        (inv) => inv.status === "diajukan" && new Date(inv.tanggalDiajukan) < sevenDaysAgo
-      ).length,
+      tagihanPendingLama: 0,
       kontrakAkanBerakhir: activeContracts.filter(
         (c) => new Date(c.tanggalBerakhir) < thirtyDaysFromNow
       ).length,
@@ -823,6 +788,7 @@ export function ContractStoreProvider({ children }: { children: ReactNode }) {
           nilaiTagihan: data.nilai_tagihan,
           namaVendor: data.nama_vendor,
           vendorEmail: data.vendor_email,
+          vendorAccountId: data.vendor_account_id,
           terbayar: data.terbayar,
           jenisAI: data.jenis_ai,
           crNotCR: data.cr_not_cr,
@@ -926,6 +892,7 @@ export function ContractStoreProvider({ children }: { children: ReactNode }) {
           nilaiPerjanjian: data.nilai_perjanjian || data.nilai_kontrak || 0,
           namaVendor: data.nama_vendor || data.vendor,
           vendorEmail: data.vendor_email,
+          vendorAccountId: data.vendor_account_id,
           nilaiTagihan: data.nilai_tagihan || 0,
           terbayar: data.terbayar || data.total_tagihan_dibayar || 0,
           statusVIP: data.status_vip || 'belum_lunas',
@@ -1137,6 +1104,7 @@ export function ContractStoreProvider({ children }: { children: ReactNode }) {
           nilaiTagihan: data.nilai_tagihan,
           namaVendor: data.nama_vendor,
           vendorEmail: data.vendor_email,
+          vendorAccountId: data.vendor_account_id,
           terbayar: data.terbayar,
           jenisAI: data.jenis_ai,
           crNotCR: data.cr_not_cr,
@@ -1319,6 +1287,7 @@ export function ContractStoreProvider({ children }: { children: ReactNode }) {
       invoices,
       alerts,
       isLoading,
+      refreshData: loadDataFromSupabase,
       getContractById,
       getInvoiceById,
       getInvoicesByContract,
@@ -1342,6 +1311,7 @@ export function ContractStoreProvider({ children }: { children: ReactNode }) {
       invoices,
       alerts,
       isLoading,
+      loadDataFromSupabase,
       getContractById,
       getInvoiceById,
       getInvoicesByContract,

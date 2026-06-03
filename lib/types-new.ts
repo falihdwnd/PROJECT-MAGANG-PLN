@@ -20,6 +20,7 @@ export interface User {
   createdAt: string;
   lastLogin?: string;
   // Vendor-specific fields
+  vendorAccountId?: string;      // ID akun vendor (vendor_accounts.id)
   contractId?: string;           // ID kontrak terkait (untuk vendor)
   vendorCompany?: string;        // Nama perusahaan vendor
   isActive?: boolean;            // Status aktif akun vendor
@@ -33,14 +34,12 @@ export interface User {
 
 export interface VendorAccount {
   id: string;
-  userId: string;
-  contractId: string;
   email: string;
   vendorName: string;
   vendorCompany: string;
   isActive: boolean;
   activatedAt?: string;
-  expiresAt: string;              // = tanggalBerakhir kontrak
+  activeUntil: string;             // = tanggalBerakhir kontrak
   createdAt: string;
   temporaryPassword?: string;     // Only shown once during creation
 }
@@ -53,13 +52,15 @@ export type ApprovalStatus = "pending" | "approved" | "rejected" | "negotiation"
 export type ApprovalType = 
   | "update_kontrak"       // Approve Update Kontrak
   | "invoice_payment"      // Kelola Invoice (Bayar/Tolak)
+  | "pengajuan_tagihan"    // Pengajuan Tagihan (Legacy/Backend mapping)
   | "update_progress"      // Approve Update Progress
   | "perpanjangan_kontrak"; // Review Pengajuan Perpanjangan
 
 export interface ApprovalRequest {
   id: string;
   type: ApprovalType;
-  contractId: string;
+  contractId: string;            // Either investment, maintenance, or administration ID
+  contractType?: 'investment' | 'maintenance' | 'administration'; // Type of contract
   invoiceId?: string;            // For invoice-related approvals
   requestedBy: string;           // User ID yang mengajukan
   requestedByName: string;
@@ -74,24 +75,29 @@ export interface ApprovalRequest {
   // Details based on type
   title: string;
   description: string;
-  
+  dokumenPendukung?: string;     // URL/path to the file
+
   // For update_kontrak - revision/negotiation
   proposedValue?: number;        // Nilai kontrak yang diajukan
   currentValue?: number;         // Nilai kontrak saat ini
   negotiatedValue?: number;      // Nilai hasil negosiasi
+  alasan?: string;               // Alasan update kontrak
   
-  // For invoice_payment
+  // For invoice_payment (tagihan)
   paymentProof?: string;         // Bukti pembayaran (URL/path)
   rejectionReason?: string;      // Alasan penolakan
+  tanggalJatuhTempo?: string;    // Tanggal jatuh tempo
   
   // For update_progress
-  proposedProgress?: number;     // Progress yang diajukan
-  currentProgress?: number;      // Progress saat ini
+  proposedProgress?: number;     // Progress yang diajukan (progress_baru)
+  currentProgress?: number;      // Progress saat ini (progress_sekarang)
+  dokumenBuktiProjek?: string;   // Dokumen bukti projek
   
   // For perpanjangan_kontrak
-  proposedEndDate?: string;      // Tanggal akhir yang diajukan
+  proposedEndDate?: string;      // Tanggal akhir yang diajukan (tanggal_perpanjang)
   currentEndDate?: string;       // Tanggal akhir saat ini
-  negotiatedEndDate?: string;    // Tanggal akhir hasil negosiasi
+  negotiatedEndDate?: string;    // Tanggal akhir hasil negosiasi (negosiasi_tanggal_akhir)
+  alasanPerpanjang?: string;     // Alasan perpanjangan
   
   createdAt: string;
   updatedAt: string;
@@ -123,6 +129,7 @@ export interface Contract {
   nilaiPerjanjian: number;        // Nilai Perjanjian
   namaVendor: string;             // Nama Vendor
   vendorEmail?: string;           // Email Vendor (untuk akun temporary)
+  vendorAccountId?: string;       // Relasi ke vendor_accounts
   nilaiTagihan: number;           // Nilai Tagihan/Nominal
 
   // Field Auto-Generate
@@ -264,8 +271,6 @@ export interface Contract {
 // ============================================
 
 export type InvoiceStatus =
-  | "diajukan"      // Baru diinput, menunggu verifikasi (DEFAULT)
-  | "diterima"      // Sudah diterima/diverifikasi
   | "ditolak"       // Ditolak
   | "dibayar";      // Sudah dibayar
 
@@ -291,7 +296,7 @@ export interface Invoice {
   tanggalXPS?: string;            // Tanggal XPS
 
   // Status & tracking
-  status: InvoiceStatus;          // diajukan (default), diterima, ditolak, dibayar
+  status: InvoiceStatus;          // ditolak, dibayar
 
   // Tanggal tracking
   tanggalDiajukan: string;        // Tanggal pertama kali diajukan

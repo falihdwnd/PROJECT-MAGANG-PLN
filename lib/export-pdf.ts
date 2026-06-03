@@ -1,24 +1,17 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
-// Warna untuk kategori kontrak
-const CONTRACT_CATEGORY_COLORS: Record<string, [number, number, number]> = {
-  investasi: [139, 92, 246],      // violet
-  pemeliharaan: [249, 115, 22],   // orange
-  administrasi: [6, 182, 212],    // cyan
-};
+// Palette warna PLN / Corporate Modern
+const COLOR_PRIMARY: [number, number, number] = [0, 91, 156];     // PLN Blue
+const COLOR_SECONDARY: [number, number, number] = [100, 116, 139]; // Slate Gray
+const COLOR_DARK: [number, number, number] = [30, 41, 59];        // Slate 800 (Charcoal)
+const COLOR_LIGHT_BG: [number, number, number] = [248, 250, 252]; // Slate 50 (Very light gray)
+const COLOR_SUCCESS: [number, number, number] = [22, 163, 74];    // Green 600
 
-// Warna untuk kategori langganan  
-const SUBSCRIPTION_CATEGORY_COLORS: Record<string, [number, number, number]> = {
-  utilitas: [59, 130, 246],       // blue
-  software: [168, 85, 247],       // purple
-  jasa: [6, 182, 212],            // cyan
-  perlengkapan: [245, 158, 11],   // amber
-  properti: [99, 102, 241],       // indigo
-  transportasi: [249, 115, 22],   // orange
-  karyawan: [16, 185, 129],       // emerald
-  pemasaran: [236, 72, 153],      // pink
-  lainnya: [107, 114, 128],       // gray
+const CONTRACT_CATEGORY_COLORS: Record<string, [number, number, number]> = {
+  investasi: [139, 92, 246],      // Violet
+  pemeliharaan: [249, 115, 22],   // Orange
+  administrasi: [6, 182, 212],    // Cyan
 };
 
 interface ContractCategoryStats {
@@ -47,29 +40,20 @@ interface OverallContractStats {
   tagihanPending: number;
 }
 
-interface SubscriptionCategoryStats {
+interface ContractDetail {
+  noPerjanjian: string;
+  judulPekerjaan: string;
+  vendor: string;
+  nilaiKontrak: number;
+  totalTagihanDibayar: number;
   kategori: string;
-  label: string;
-  totalSubs: number;
-  activeSubs: number;
-  hasGaps: number;
-  totalAnggaranBulanan: number;
-  totalTerbayar: number;
-  avgProgress: number;
-}
-
-interface OverallSubscriptionStats {
-  totalSubs: number;
-  activeSubs: number;
-  totalTerbayar: number;
-  totalGaps: number;
+  status: string;
 }
 
 interface LaporanPDFData {
   contractStats: ContractCategoryStats[];
   overallContractStats: OverallContractStats;
-  subscriptionStats: SubscriptionCategoryStats[];
-  overallSubStats: OverallSubscriptionStats;
+  contracts: ContractDetail[];
 }
 
 function formatCurrencyPDF(value: number): string {
@@ -78,8 +62,12 @@ function formatCurrencyPDF(value: number): string {
   return `Rp ${value.toLocaleString("id-ID")}`;
 }
 
+function formatFullCurrency(value: number): string {
+  return `Rp ${value.toLocaleString("id-ID")}`;
+}
+
 function drawBarChart(
-  doc: jsPDF, 
+  doc: jsPDF,
   data: { label: string; pagu: number; realisasi: number; kategori: string }[],
   startX: number,
   startY: number,
@@ -89,93 +77,94 @@ function drawBarChart(
   colorMap: Record<string, [number, number, number]>
 ) {
   // Title
-  doc.setFontSize(11);
+  doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
-  doc.setTextColor(31, 41, 55);
+  doc.setTextColor(COLOR_DARK[0], COLOR_DARK[1], COLOR_DARK[2]);
   doc.text(title, startX, startY);
-  
+
   const chartStartY = startY + 8;
   const chartHeight = height - 25;
   const barWidth = (width - 40) / (data.length * 2.5);
   const gapBetweenBars = 3;
   const gapBetweenGroups = barWidth * 0.8;
-  
+
   // Find max value for scaling
-  const maxValue = Math.max(...data.map(d => Math.max(d.pagu, d.realisasi)));
+  const maxValue = Math.max(...data.map(d => Math.max(d.pagu, d.realisasi))) || 1;
   const scale = chartHeight / maxValue;
-  
-  // Draw Y axis
-  doc.setDrawColor(200, 200, 200);
+
+  // Draw X/Y axis lines
+  doc.setDrawColor(226, 232, 240); // border-slate-200
   doc.setLineWidth(0.5);
   doc.line(startX, chartStartY, startX, chartStartY + chartHeight);
-  
-  // Draw X axis
-  doc.line(startX, chartStartY + chartHeight, startX + width - 10, chartStartY + chartHeight);
-  
-  // Draw Y axis labels
+  doc.line(startX, chartStartY + chartHeight, startX + width, chartStartY + chartHeight);
+
+  // Draw Y axis labels & horizontal gridlines
   doc.setFontSize(7);
   doc.setFont("helvetica", "normal");
-  doc.setTextColor(107, 114, 128);
-  
-  const ySteps = 5;
+  doc.setTextColor(148, 163, 184); // text-slate-400
+
+  const ySteps = 4;
   for (let i = 0; i <= ySteps; i++) {
     const value = (maxValue / ySteps) * i;
     const yPos = chartStartY + chartHeight - (value * scale);
-    
+
     // Grid line
-    doc.setDrawColor(230, 230, 230);
-    doc.line(startX, yPos, startX + width - 10, yPos);
-    
+    doc.setDrawColor(241, 245, 249); // border-slate-100
+    doc.line(startX, yPos, startX + width, yPos);
+
     // Label
     let label: string;
-    if (value >= 1000000000) label = `${(value / 1000000000).toFixed(0)}M`;
+    if (value >= 1000000000) label = `${(value / 1000000000).toFixed(1)}M`;
     else if (value >= 1000000) label = `${(value / 1000000).toFixed(0)}jt`;
     else label = value.toFixed(0);
-    
-    doc.text(label, startX - 2, yPos + 1, { align: "right" });
+
+    doc.text(label, startX - 3, yPos + 1, { align: "right" });
   }
-  
+
   // Draw bars
   let currentX = startX + 15;
-  
-  data.forEach((item, index) => {
+
+  data.forEach((item) => {
     const paguHeight = item.pagu * scale;
     const realisasiHeight = item.realisasi * scale;
-    
-    // Pagu bar (gray)
-    doc.setFillColor(148, 163, 184);
+
+    // Pagu bar (Slate gray)
+    doc.setFillColor(203, 213, 225); // Slate 300
     doc.rect(currentX, chartStartY + chartHeight - paguHeight, barWidth, paguHeight, "F");
-    
-    // Realisasi bar (colored)
-    const color = colorMap[item.kategori] || [107, 114, 128];
+
+    // Realisasi bar (Kategori-specific color)
+    const color = colorMap[item.kategori] || COLOR_PRIMARY;
     doc.setFillColor(color[0], color[1], color[2]);
     doc.rect(currentX + barWidth + gapBetweenBars, chartStartY + chartHeight - realisasiHeight, barWidth, realisasiHeight, "F");
-    
+
     // X axis label
     doc.setFontSize(8);
-    doc.setTextColor(75, 85, 99);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(COLOR_DARK[0], COLOR_DARK[1], COLOR_DARK[2]);
     const labelX = currentX + barWidth + gapBetweenBars / 2;
-    doc.text(item.label, labelX, chartStartY + chartHeight + 8, { align: "center" });
-    
+    doc.text(item.label, labelX, chartStartY + chartHeight + 6, { align: "center" });
+
     currentX += (barWidth * 2) + gapBetweenBars + gapBetweenGroups;
   });
-  
+
   // Legend
-  const legendY = chartStartY + chartHeight + 18;
+  const legendY = chartStartY + chartHeight + 14;
   doc.setFontSize(8);
-  
-  // Pagu legend
-  doc.setFillColor(148, 163, 184);
-  doc.rect(startX + 20, legendY - 3, 8, 4, "F");
-  doc.setTextColor(75, 85, 99);
-  doc.text("Pagu", startX + 30, legendY);
-  
-  // Realisasi legend
-  doc.setFillColor(34, 197, 94);
-  doc.rect(startX + 60, legendY - 3, 8, 4, "F");
-  doc.text("Realisasi", startX + 70, legendY);
-  
-  return legendY + 10;
+  doc.setFont("helvetica", "normal");
+
+  // Pagu Legend
+  doc.setFillColor(203, 213, 225);
+  doc.rect(startX + 20, legendY - 2.5, 6, 3, "F");
+  doc.setTextColor(COLOR_SECONDARY[0], COLOR_SECONDARY[1], COLOR_SECONDARY[2]);
+  doc.text("Pagu Anggaran", startX + 28, legendY);
+
+  // Realisasi Legend
+  doc.setFillColor(COLOR_PRIMARY[0], COLOR_PRIMARY[1], COLOR_PRIMARY[2]);
+  doc.rect(startX + 65, legendY - 2.5, 6, 3, "F");
+  doc.setTextColor(COLOR_SECONDARY[0], COLOR_SECONDARY[1], COLOR_SECONDARY[2]);
+  doc.text("Realisasi Penyerapan", startX + 73, legendY);
+
+  return legendY + 6;
 }
 
 export function exportLaporanPDF(data: LaporanPDFData): void {
@@ -189,368 +178,315 @@ export function exportLaporanPDF(data: LaporanPDFData): void {
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 15;
   const contentWidth = pageWidth - (margin * 2);
-  
+  const today = new Date();
+
   let currentY = margin;
 
-  // ========== HEADER ==========
-  doc.setFillColor(37, 99, 235); // Blue
-  doc.rect(0, 0, pageWidth, 35, "F");
-  
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(20);
+  // ========== HELPER: DRAW FOOTER AND HEADER LINE ==========
+  const addPageDecorations = (pdfDoc: jsPDF, pageNum: number, total: number) => {
+    pdfDoc.setPage(pageNum);
+
+    // Header Thin Accent Line
+    pdfDoc.setFillColor(COLOR_PRIMARY[0], COLOR_PRIMARY[1], COLOR_PRIMARY[2]);
+    pdfDoc.rect(0, 0, pageWidth, 3, "F");
+
+    // Footer Line
+    pdfDoc.setDrawColor(226, 232, 240); // slate-200
+    pdfDoc.setLineWidth(0.5);
+    pdfDoc.line(margin, pageHeight - 12, pageWidth - margin, pageHeight - 12);
+
+    // Footer Text
+    pdfDoc.setFontSize(8);
+    pdfDoc.setFont("helvetica", "normal");
+    pdfDoc.setTextColor(148, 163, 184); // slate-400
+    pdfDoc.text("PT PLN (Persero) - Sistem Informasi Monitoring Anggaran & Proyek (SIMAP)", margin, pageHeight - 8);
+    pdfDoc.text(`Halaman ${pageNum} dari ${total}`, pageWidth - margin, pageHeight - 8, { align: "right" });
+  };
+
+  // ========== FIRST PAGE HEADER ==========
+  // Decorative Left Color bar
+  doc.setFillColor(COLOR_PRIMARY[0], COLOR_PRIMARY[1], COLOR_PRIMARY[2]);
+  doc.rect(margin, currentY, 3, 20, "F");
+
+  // Title & Institution
+  doc.setTextColor(COLOR_DARK[0], COLOR_DARK[1], COLOR_DARK[2]);
   doc.setFont("helvetica", "bold");
-  doc.text("LAPORAN MONITORING KONTRAK & LANGGANAN", pageWidth / 2, 15, { align: "center" });
-  
-  doc.setFontSize(11);
+  doc.setFontSize(16);
+  doc.text("LAPORAN EKSEKUTIF REALISASI KONTRAK", margin + 6, currentY + 5);
+
   doc.setFont("helvetica", "normal");
-  doc.text("PT PLN (Persero)", pageWidth / 2, 23, { align: "center" });
-  
-  doc.setFontSize(9);
-  const today = new Date();
-  const dateStr = today.toLocaleDateString("id-ID", { 
-    weekday: "long", 
-    year: "numeric", 
-    month: "long", 
-    day: "numeric" 
+  doc.setFontSize(10);
+  doc.setTextColor(COLOR_SECONDARY[0], COLOR_SECONDARY[1], COLOR_SECONDARY[2]);
+  doc.text("PT PLN (Persero) - Laporan Monitoring Penggunaan Anggaran Proyek", margin + 6, currentY + 11);
+
+  // Date information (aligned right)
+  const dateStr = today.toLocaleDateString("id-ID", {
+    weekday: "long", year: "numeric", month: "long", day: "numeric"
   });
-  doc.text(`Dicetak: ${dateStr}`, pageWidth / 2, 30, { align: "center" });
-  
-  currentY = 45;
+  doc.setFontSize(8);
+  doc.text(`Dicetak pada: ${dateStr}`, pageWidth - margin, currentY + 5, { align: "right" });
 
-  // ========== RINGKASAN KONTRAK ==========
-  doc.setTextColor(31, 41, 55);
-  doc.setFontSize(14);
-  doc.setFont("helvetica", "bold");
-  doc.text("RINGKASAN KONTRAK", margin, currentY);
-  
+  currentY += 22;
+
+  // Horizontal separator
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.5);
+  doc.line(margin, currentY, pageWidth - margin, currentY);
+
   currentY += 8;
-  
-  // Summary box kontrak
-  doc.setFillColor(239, 246, 255); // Light blue
-  doc.roundedRect(margin, currentY, contentWidth, 22, 3, 3, "F");
-  
-  const boxY = currentY + 5;
-  const colWidth = contentWidth / 4;
-  
-  doc.setFontSize(8);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(107, 114, 128);
-  
-  // Column 1: Total Kontrak
-  doc.text("Total Kontrak", margin + 5, boxY);
-  doc.setFontSize(14);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(31, 41, 55);
-  doc.text(data.overallContractStats.totalKontrak.toString(), margin + 5, boxY + 8);
-  doc.setFontSize(7);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(107, 114, 128);
-  doc.text(`${data.overallContractStats.kontrakAktif} aktif`, margin + 5, boxY + 13);
-  
-  // Column 2: Pagu Total
-  doc.setFontSize(8);
-  doc.text("Pagu Total", margin + colWidth + 5, boxY);
-  doc.setFontSize(12);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(31, 41, 55);
-  doc.text(formatCurrencyPDF(data.overallContractStats.totalNilai), margin + colWidth + 5, boxY + 8);
-  
-  // Column 3: Realisasi
-  doc.setFontSize(8);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(107, 114, 128);
-  doc.text("Realisasi Total", margin + (colWidth * 2) + 5, boxY);
-  doc.setFontSize(12);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(22, 163, 74); // Green
-  doc.text(formatCurrencyPDF(data.overallContractStats.totalDibayar), margin + (colWidth * 2) + 5, boxY + 8);
-  doc.setFontSize(7);
-  doc.setFont("helvetica", "normal");
-  doc.text(`${data.overallContractStats.persentaseRealisasi.toFixed(1)}% serapan`, margin + (colWidth * 2) + 5, boxY + 13);
-  
-  // Column 4: Total Tagihan
-  doc.setFontSize(8);
-  doc.setTextColor(107, 114, 128);
-  doc.text("Total Tagihan", margin + (colWidth * 3) + 5, boxY);
-  doc.setFontSize(14);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(31, 41, 55);
-  doc.text(data.overallContractStats.totalTagihan.toString(), margin + (colWidth * 3) + 5, boxY + 8);
-  doc.setFontSize(7);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(107, 114, 128);
-  doc.text(`${data.overallContractStats.tagihanPending} pending`, margin + (colWidth * 3) + 5, boxY + 13);
-  
-  currentY += 30;
 
-  // ========== BAR CHART KONTRAK ==========
+  // ========== EXECUTIVE SUMMARY DASHBOARD CARDS (3 Columns) ==========
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(COLOR_DARK[0], COLOR_DARK[1], COLOR_DARK[2]);
+  doc.text("SUMMARY DASHBOARD", margin, currentY);
+
+  currentY += 4;
+
+  const cardWidth = (contentWidth - 10) / 3;
+  const cardHeight = 24;
+
+  // Card 1: Total Kontrak
+  doc.setFillColor(COLOR_LIGHT_BG[0], COLOR_LIGHT_BG[1], COLOR_LIGHT_BG[2]);
+  doc.roundedRect(margin, currentY, cardWidth, cardHeight, 2, 2, "F");
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(COLOR_SECONDARY[0], COLOR_SECONDARY[1], COLOR_SECONDARY[2]);
+  doc.text("Total Volume Kontrak", margin + 5, currentY + 6);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(15);
+  doc.setTextColor(COLOR_PRIMARY[0], COLOR_PRIMARY[1], COLOR_PRIMARY[2]);
+  doc.text(data.overallContractStats.totalKontrak.toString(), margin + 5, currentY + 14);
+  doc.setFontSize(7.5);
+  doc.setTextColor(COLOR_DARK[0], COLOR_DARK[1], COLOR_DARK[2]);
+  doc.text(`${data.overallContractStats.kontrakAktif} Kontrak Status Aktif`, margin + 5, currentY + 20);
+
+  // Card 2: Pagu Anggaran
+  const card2X = margin + cardWidth + 5;
+  doc.setFillColor(COLOR_LIGHT_BG[0], COLOR_LIGHT_BG[1], COLOR_LIGHT_BG[2]);
+  doc.roundedRect(card2X, currentY, cardWidth, cardHeight, 2, 2, "F");
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(COLOR_SECONDARY[0], COLOR_SECONDARY[1], COLOR_SECONDARY[2]);
+  doc.text("Pagu Anggaran (Pagu)", card2X + 5, currentY + 6);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12.5);
+  doc.setTextColor(COLOR_DARK[0], COLOR_DARK[1], COLOR_DARK[2]);
+  doc.text(formatFullCurrency(data.overallContractStats.totalNilai), card2X + 5, currentY + 14);
+  doc.setFontSize(7.5);
+  doc.setTextColor(COLOR_SECONDARY[0], COLOR_SECONDARY[1], COLOR_SECONDARY[2]);
+  doc.text(`Total Alokasi Investasi & Rutin`, card2X + 5, currentY + 20);
+
+  // Card 3: Penyerapan (Realisasi)
+  const card3X = margin + (cardWidth * 2) + 10;
+  doc.setFillColor(COLOR_LIGHT_BG[0], COLOR_LIGHT_BG[1], COLOR_LIGHT_BG[2]);
+  doc.roundedRect(card3X, currentY, cardWidth, cardHeight, 2, 2, "F");
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(COLOR_SECONDARY[0], COLOR_SECONDARY[1], COLOR_SECONDARY[2]);
+  doc.text("Realisasi Serapan", card3X + 5, currentY + 6);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12.5);
+  doc.setTextColor(COLOR_SUCCESS[0], COLOR_SUCCESS[1], COLOR_SUCCESS[2]);
+  doc.text(formatFullCurrency(data.overallContractStats.totalDibayar), card3X + 5, currentY + 14);
+  doc.setFontSize(7.5);
+  doc.setTextColor(COLOR_SUCCESS[0], COLOR_SUCCESS[1], COLOR_SUCCESS[2]);
+  doc.text(`${data.overallContractStats.persentaseRealisasi.toFixed(1)}% Anggaran Terserap`, card3X + 5, currentY + 20);
+
+  currentY += cardHeight + 10;
+
+  // ========== VISUALIZATION CHARTS ==========
   const contractChartData = data.contractStats.map(cat => ({
     label: cat.label,
     pagu: cat.totalNilai,
     realisasi: cat.totalDibayar,
     kategori: cat.kategori,
   }));
-  
+
   currentY = drawBarChart(
     doc,
     contractChartData,
     margin,
     currentY,
     contentWidth,
-    55,
-    "Grafik Kontrak per Kategori",
+    50,
+    "PERBANDINGAN PAGU DAN REALISASI PER KATEGORI",
     CONTRACT_CATEGORY_COLORS
   );
 
-  currentY += 5;
+  currentY += 8;
 
-  // ========== TABEL DETAIL KONTRAK ==========
+  // ========== TABLE 1: SUMMARY STATISTICS BY CATEGORY ==========
   doc.setFontSize(11);
   doc.setFont("helvetica", "bold");
-  doc.setTextColor(31, 41, 55);
-  doc.text("Detail Kontrak per Kategori", margin, currentY);
-  
+  doc.setTextColor(COLOR_DARK[0], COLOR_DARK[1], COLOR_DARK[2]);
+  doc.text("RINGKASAN DATA KONTRAK PER KATEGORI", margin, currentY);
+
   currentY += 3;
 
   autoTable(doc, {
     startY: currentY,
-    head: [["Kategori", "Kontrak", "Aktif", "Pagu", "Realisasi", "Sisa", "%"]],
+    head: [["Kategori Pekerjaan", "Vol", "Aktif", "Pagu Anggaran", "Realisasi Bayar", "Sisa Anggaran", "Serapan %"]],
     body: [
       ...data.contractStats.map((cat) => [
         cat.label,
         cat.totalKontrak.toString(),
         cat.kontrakAktif.toString(),
-        formatCurrencyPDF(cat.totalNilai),
-        formatCurrencyPDF(cat.totalDibayar),
-        formatCurrencyPDF(cat.sisaAnggaran),
+        formatFullCurrency(cat.totalNilai),
+        formatFullCurrency(cat.totalDibayar),
+        formatFullCurrency(cat.sisaAnggaran),
         `${cat.persentaseRealisasi.toFixed(1)}%`,
       ]),
-      // Total row
       [
-        { content: "TOTAL", styles: { fontStyle: "bold" } },
+        { content: "TOTAL EKSEKUTIF", styles: { fontStyle: "bold" } },
         { content: data.overallContractStats.totalKontrak.toString(), styles: { fontStyle: "bold" } },
         { content: data.overallContractStats.kontrakAktif.toString(), styles: { fontStyle: "bold" } },
-        { content: formatCurrencyPDF(data.overallContractStats.totalNilai), styles: { fontStyle: "bold" } },
-        { content: formatCurrencyPDF(data.overallContractStats.totalDibayar), styles: { fontStyle: "bold" } },
-        { content: formatCurrencyPDF(data.overallContractStats.sisaAnggaran), styles: { fontStyle: "bold" } },
+        { content: formatFullCurrency(data.overallContractStats.totalNilai), styles: { fontStyle: "bold" } },
+        { content: formatFullCurrency(data.overallContractStats.totalDibayar), styles: { fontStyle: "bold" } },
+        { content: formatFullCurrency(data.overallContractStats.sisaAnggaran), styles: { fontStyle: "bold" } },
         { content: `${data.overallContractStats.persentaseRealisasi.toFixed(1)}%`, styles: { fontStyle: "bold" } },
       ],
     ],
     theme: "striped",
     styles: {
-      overflow: 'linebreak',
-      cellWidth: 'wrap',
-      cellPadding: 2,
+      fontSize: 8,
+      cellPadding: 2.5,
+      valign: "middle",
     },
-    headStyles: { 
-      fillColor: [37, 99, 235], 
-      textColor: 255, 
+    headStyles: {
+      fillColor: COLOR_PRIMARY,
+      textColor: 255,
       fontStyle: "bold",
-      fontSize: 9,
+      fontSize: 8.5,
       halign: "center",
     },
-    bodyStyles: { 
+    bodyStyles: {
+      halign: "center",
+      textColor: COLOR_DARK,
+    },
+    columnStyles: {
+      0: { halign: "left", fontStyle: "bold", cellWidth: 35 },
+      1: { cellWidth: 12 },
+      2: { cellWidth: 12 },
+      3: { halign: "right", cellWidth: 32 },
+      4: { halign: "right", cellWidth: 32 },
+      5: { halign: "right", cellWidth: 32 },
+      6: { halign: "center", cellWidth: 20 },
+    },
+    margin: { left: margin, right: margin },
+  });
+
+  // ========== PAGE BREAK FOR DETAILS LIST ==========
+  doc.addPage();
+  currentY = margin + 8;
+
+  // ========== TABLE 2: DETAILED CONTRACTS LIST ==========
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(COLOR_DARK[0], COLOR_DARK[1], COLOR_DARK[2]);
+  doc.text("DAFTAR RINCIAN SELURUH KONTRAK AKTIF & PROSES", margin, currentY);
+
+  currentY += 4;
+
+  autoTable(doc, {
+    startY: currentY,
+    head: [["No. Kontrak / Perjanjian", "Deskripsi Judul Pekerjaan", "Vendor Pelaksana", "Kategori", "Nilai Kontrak", "Realisasi Bayar", "Status"]],
+    body: data.contracts.map((c) => [
+      c.noPerjanjian,
+      c.judulPekerjaan,
+      c.vendor,
+      c.kategori.toUpperCase(),
+      formatCurrencyPDF(c.nilaiKontrak),
+      formatCurrencyPDF(c.totalTagihanDibayar),
+      c.status.toUpperCase(),
+    ]),
+    theme: "striped",
+    styles: {
+      fontSize: 7.5,
+      cellPadding: 2,
+      valign: "middle",
+      overflow: "linebreak",
+    },
+    headStyles: {
+      fillColor: [15, 23, 42], // Dark slate-900 for detail table header
+      textColor: 255,
+      fontStyle: "bold",
       fontSize: 8,
       halign: "center",
     },
+    bodyStyles: {
+      textColor: COLOR_DARK,
+    },
     columnStyles: {
-      0: { halign: "left", cellWidth: 50 },
-      1: { cellWidth: 18 },
-      2: { cellWidth: 18, halign: "center" },
-      3: { halign: "right", cellWidth: 40 },
-      4: { halign: "right", cellWidth: 40 },
-      5: { halign: "right", cellWidth: 40 },
-      6: { halign: "center", cellWidth: 22 },
+      0: { fontStyle: "bold", cellWidth: 30 },
+      1: { cellWidth: 50 },
+      2: { cellWidth: 32 },
+      3: { halign: "center", cellWidth: 20 },
+      4: { halign: "right", cellWidth: 22 },
+      5: { halign: "right", cellWidth: 22 },
+      6: { halign: "center", cellWidth: 14, fontStyle: "bold" },
+    },
+    didDrawCell: (cellData) => {
+      // Highlight status column colors
+      if (cellData.column.index === 6 && cellData.section === "body") {
+        const val = String(cellData.cell.raw).toLowerCase();
+        if (val === "aktif") {
+          cellData.cell.styles.textColor = COLOR_SUCCESS;
+        } else if (val === "selesai") {
+          cellData.cell.styles.textColor = [37, 99, 235]; // Blue
+        } else {
+          cellData.cell.styles.textColor = [217, 119, 6]; // Amber
+        }
+      }
     },
     margin: { left: margin, right: margin },
-    tableWidth: 'auto',
   });
-
-  // Get final Y position after table
   currentY = (doc as any).lastAutoTable.finalY + 15;
 
-  // Check if we need a new page for subscription section
-  if (currentY > pageHeight - 100) {
+  // ========== V. VERIFICATION & APPROVAL SHEET (TANDA TANGAN RESMI) ==========
+  if (currentY > pageHeight - 55) {
     doc.addPage();
-    currentY = margin;
+    currentY = margin + 10;
   }
 
-  // ========== RINGKASAN LANGGANAN ==========
-  doc.setFillColor(16, 185, 129); // Emerald
-  doc.rect(0, currentY - 5, pageWidth, 8, "F");
-  
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(14);
-  doc.setFont("helvetica", "bold");
-  doc.text("RINGKASAN LANGGANAN", margin, currentY);
-  
-  currentY += 10;
-  
-  // Summary box langganan
-  doc.setFillColor(236, 253, 245); // Light green
-  doc.roundedRect(margin, currentY, contentWidth, 22, 3, 3, "F");
-  
-  const subBoxY = currentY + 5;
-  
-  doc.setFontSize(8);
+  // Draw Line Separator for Signatures
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.5);
+  doc.line(margin, currentY, pageWidth - margin, currentY);
+
+  currentY += 6;
+
+  doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
-  doc.setTextColor(107, 114, 128);
+  doc.setTextColor(COLOR_DARK[0], COLOR_DARK[1], COLOR_DARK[2]);
   
-  // Column 1: Total Langganan
-  doc.text("Total Langganan", margin + 5, subBoxY);
-  doc.setFontSize(14);
+  const signY = currentY + 6;
+  
+  // Left side signature (Preparer)
+  doc.text("Dibuat Oleh,", margin + 10, signY);
+  doc.text("Supervisor Keuangan & Anggaran", margin + 10, signY + 4.5);
+  doc.line(margin + 10, signY + 20, margin + 70, signY + 20); // line for signature
   doc.setFont("helvetica", "bold");
-  doc.setTextColor(31, 41, 55);
-  doc.text(data.overallSubStats.totalSubs.toString(), margin + 5, subBoxY + 8);
-  doc.setFontSize(7);
+  doc.text("Faisal Fatih", margin + 10, signY + 24);
   doc.setFont("helvetica", "normal");
-  doc.setTextColor(107, 114, 128);
-  doc.text(`${data.overallSubStats.activeSubs} aktif`, margin + 5, subBoxY + 13);
-  
-  // Column 2: Status Pembayaran
-  doc.setFontSize(8);
-  doc.text("Status Pembayaran", margin + colWidth + 5, subBoxY);
-  doc.setFontSize(12);
+  doc.text("NIP. 9412089PLN", margin + 10, signY + 28);
+
+  // Right side signature (Approver)
+  doc.text("Mengetahui & Menyetujui,", pageWidth - margin - 70, signY);
+  doc.text("Manager Bidang Keuangan", pageWidth - margin - 70, signY + 4.5);
+  doc.line(pageWidth - margin - 70, signY + 20, pageWidth - margin - 10, signY + 20);
   doc.setFont("helvetica", "bold");
-  doc.setTextColor(data.overallSubStats.totalGaps > 0 ? 245 : 22, data.overallSubStats.totalGaps > 0 ? 158 : 163, data.overallSubStats.totalGaps > 0 ? 11 : 74);
-  doc.text(data.overallSubStats.totalGaps > 0 ? `${data.overallSubStats.totalGaps} Perlu Perhatian` : "Aman", margin + colWidth + 5, subBoxY + 8);
-  
-  // Column 3: Total Terbayar
-  doc.setFontSize(8);
+  doc.text("Ferza Farrell Wibowo", pageWidth - margin - 70, signY + 24);
   doc.setFont("helvetica", "normal");
-  doc.setTextColor(107, 114, 128);
-  doc.text("Total Terbayar", margin + (colWidth * 2) + 5, subBoxY);
-  doc.setFontSize(12);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(22, 163, 74);
-  doc.text(formatCurrencyPDF(data.overallSubStats.totalTerbayar), margin + (colWidth * 2) + 5, subBoxY + 8);
-  
-  // Column 4: Kategori
-  doc.setFontSize(8);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(107, 114, 128);
-  doc.text("Total Kategori", margin + (colWidth * 3) + 5, subBoxY);
-  doc.setFontSize(14);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(31, 41, 55);
-  doc.text(data.subscriptionStats.length.toString(), margin + (colWidth * 3) + 5, subBoxY + 8);
-  
-  currentY += 30;
+  doc.text("NIP. 9104052PLN", pageWidth - margin - 70, signY + 28);
 
-  // ========== BAR CHART LANGGANAN ==========
-  if (data.subscriptionStats.length > 0) {
-    const subscriptionChartData = data.subscriptionStats.map(cat => ({
-      label: cat.label.length > 8 ? cat.label.substring(0, 8) + ".." : cat.label,
-      pagu: cat.totalAnggaranBulanan * 12, // Annualized
-      realisasi: cat.totalTerbayar,
-      kategori: cat.kategori,
-    }));
-    
-    currentY = drawBarChart(
-      doc,
-      subscriptionChartData,
-      margin,
-      currentY,
-      contentWidth,
-      55,
-      "Grafik Langganan per Kategori",
-      SUBSCRIPTION_CATEGORY_COLORS
-    );
-
-    currentY += 5;
-  }
-
-  // ========== TABEL DETAIL LANGGANAN ==========
-  // Check if we need a new page
-  if (currentY > pageHeight - 60) {
-    doc.addPage();
-    currentY = margin;
-  }
-
-  doc.setFontSize(11);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(31, 41, 55);
-  doc.text("Detail Langganan per Kategori", margin, currentY);
-  
-  currentY += 3;
-
-  if (data.subscriptionStats.length > 0) {
-    autoTable(doc, {
-      startY: currentY,
-      head: [["Kategori", "Langganan", "Aktif", "Anggaran/Bulan", "Total Terbayar", "Progress", "Status"]],
-      body: data.subscriptionStats.map((stat) => [
-        stat.label,
-        stat.totalSubs.toString(),
-        stat.activeSubs.toString(),
-        formatCurrencyPDF(stat.totalAnggaranBulanan),
-        formatCurrencyPDF(stat.totalTerbayar),
-        `${stat.avgProgress.toFixed(0)}%`,
-        stat.hasGaps > 0 ? "Perlu Perhatian" : "Aman",
-      ]),
-      theme: "striped",
-      styles: {
-        overflow: 'linebreak',
-        cellWidth: 'wrap',
-        cellPadding: 2,
-      },
-      headStyles: { 
-        fillColor: [16, 185, 129], 
-        textColor: 255, 
-        fontStyle: "bold",
-        fontSize: 9,
-        halign: "center",
-      },
-      bodyStyles: { 
-        fontSize: 8,
-        halign: "center",
-      },
-      columnStyles: {
-        0: { halign: "left", cellWidth: 45 },
-        1: { cellWidth: 18 },
-        2: { cellWidth: 18, halign: "center" },
-        3: { halign: "right", cellWidth: 38 },
-        4: { halign: "right", cellWidth: 38 },
-        5: { halign: "right", cellWidth: 38 },
-        6: { halign: "center", cellWidth: 22 },
-      },
-      didDrawCell: (data) => {
-        if (data.column.index === 6 && data.section === "body") {
-          const value = data.cell.raw as string;
-          if (value === "Perlu Perhatian") {
-            // Use autoTable cell textColor instead of global doc change
-            data.cell.styles.textColor = [245, 158, 11];
-          }
-        }
-      },
-      margin: { left: margin, right: margin },
-      tableWidth: 'auto',
-    });
-  } else {
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "italic");
-    doc.setTextColor(107, 114, 128);
-    doc.text("Belum ada data langganan", margin, currentY + 10);
-  }
-
-  // ========== FOOTER ==========
+  // ========== APPLY PAGE DECORATIONS (HEADERS & FOOTERS) ==========
   const totalPages = doc.getNumberOfPages();
   for (let i = 1; i <= totalPages; i++) {
-    doc.setPage(i);
-    
-    // Footer line
-    doc.setDrawColor(200, 200, 200);
-    doc.setLineWidth(0.5);
-    doc.line(margin, pageHeight - 15, pageWidth - margin, pageHeight - 15);
-    
-    // Footer text
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(107, 114, 128);
-    doc.text("PT PLN (Persero) - Sistem Monitoring Kontrak & Langganan", margin, pageHeight - 10);
-    doc.text(`Halaman ${i} dari ${totalPages}`, pageWidth - margin, pageHeight - 10, { align: "right" });
+    addPageDecorations(doc, i, totalPages);
   }
 
   // Save the PDF
-  const fileName = `Laporan_Kontrak_Langganan_${today.toISOString().split("T")[0]}.pdf`;
+  const fileName = `Laporan_SIMAP_PLN_${today.toISOString().split("T")[0]}.pdf`;
   doc.save(fileName);
 }

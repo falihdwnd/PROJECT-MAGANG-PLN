@@ -151,6 +151,7 @@ export default function CreateContractPage() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -173,8 +174,8 @@ export default function CreateContractPage() {
         // Validation for Investasi category
         if (!formData.tanggalPerjanjian || !formData.tanggalBerakhir || !formData.judulPRK ||
           !formData.nilaiPerjanjian || !formData.namaVendor || !formData.nilaiTagihan ||
-          !formData.namaPekerjaan) {
-          setErrorMessage("Mohon lengkapi field yang wajib diisi (ditandai dengan *)");
+          !formData.namaPekerjaan || !formData.vendorEmail) {
+          setErrorMessage("Mohon lengkapi field yang wajib diisi (ditandai dengan *), termasuk Email Vendor");
           window.scrollTo({ top: 0, behavior: "smooth" });
           setIsSubmitting(false);
           return;
@@ -202,6 +203,7 @@ export default function CreateContractPage() {
           judulPRK: formData.judulPRK,
           nilaiPerjanjian,
           namaVendor: formData.namaVendor,
+          vendorEmail: formData.vendorEmail,
           nilaiTagihan,
           noWBSPosAnggaran,
           noSKKI,
@@ -242,8 +244,8 @@ export default function CreateContractPage() {
       } else if (formData.kategori === "pemeliharaan") {
         // Validation for Pemeliharaan category
         if (!formData.judulPerjanjian || !formData.namaVendor || !formData.nilaiPerjanjian || 
-            !formData.tanggalPerjanjian || !formData.tanggalBerakhir) {
-          setErrorMessage("Mohon lengkapi field yang wajib diisi (ditandai dengan *)");
+            !formData.tanggalPerjanjian || !formData.tanggalBerakhir || !formData.vendorEmail) {
+          setErrorMessage("Mohon lengkapi field yang wajib diisi (ditandai dengan *), termasuk Email Vendor");
           window.scrollTo({ top: 0, behavior: "smooth" });
           setIsSubmitting(false);
           return;
@@ -276,6 +278,7 @@ export default function CreateContractPage() {
           nilaiKontrak: nilaiPerjanjian,
           namaVendor: formData.namaVendor,
           vendor: formData.namaVendor,
+          vendorEmail: formData.vendorEmail,
 
           // Tagihan
           nilaiTagihanKontrakPusat: nilaiTagihanPusat,
@@ -335,8 +338,8 @@ export default function CreateContractPage() {
       } else {
         // Validation for Administrasi category
         if (!formData.judulPerjanjian || !formData.namaVendor || 
-            !formData.nilaiPerjanjian || !formData.tanggalPerjanjian || !formData.tanggalBerakhir) {
-          setErrorMessage("Mohon lengkapi field yang wajib diisi (ditandai dengan *)");
+            !formData.nilaiPerjanjian || !formData.tanggalPerjanjian || !formData.tanggalBerakhir || !formData.vendorEmail) {
+          setErrorMessage("Mohon lengkapi field yang wajib diisi (ditandai dengan *), termasuk Email Vendor");
           window.scrollTo({ top: 0, behavior: "smooth" });
           setIsSubmitting(false);
           return;
@@ -371,6 +374,7 @@ export default function CreateContractPage() {
           nilaiKontrak: nilaiPerjanjian,
           namaVendor: formData.namaVendor,
           vendor: formData.namaVendor,
+          vendorEmail: formData.vendorEmail,
 
           // Tagihan
           nilaiTagihan: nilaiTagihanKeseluruhan,
@@ -425,30 +429,17 @@ export default function CreateContractPage() {
         await createContract(newContract);
       }
 
-      // Create vendor account if email is provided
-      if (formData.vendorEmail) {
-        try {
-          await fetch("/api/vendor-accounts", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              email: formData.vendorEmail,
-              vendorName: formData.namaVendor || formData.vendor,
-              vendorCompany: formData.namaVendor || formData.vendor,
-              contractId: "NEW", // Will be updated with actual ID
-              contractTitle: formData.judulPRK || formData.judulPerjanjian || formData.namaPekerjaan,
-              tanggalPerjanjian: formData.tanggalPerjanjian,
-              tanggalBerakhir: formData.tanggalBerakhir,
-              sendEmail: true,
-            }),
-          });
-        } catch (emailError) {
-          console.warn("Vendor account creation failed (non-blocking):", emailError);
-        }
-      }
-
-      // Redirect to contract list
-      router.push("/kontrak");
+      // Show success notification before redirect
+      setSuccessMessage(
+        formData.vendorEmail
+          ? `Kontrak berhasil disimpan! Email aktivasi akun telah dikirim ke ${formData.vendorEmail}. Vendor dapat mengaktifkan akun melalui link di email tersebut.`
+          : "Kontrak berhasil disimpan!"
+      );
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      // Redirect after delay to allow user to see the success message
+      setTimeout(() => {
+        router.push("/kontrak");
+      }, 3000);
     } catch (error) {
       console.error("Error creating contract:", error);
       setErrorMessage("Terjadi kesalahan saat membuat kontrak. Silakan coba lagi.");
@@ -566,18 +557,19 @@ export default function CreateContractPage() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Email Vendor
+              Email Vendor <span className="text-red-500">*</span>
             </label>
             <input
               type="email"
               name="vendorEmail"
               value={formData.vendorEmail}
               onChange={handleChange}
+              required
               placeholder="vendor@example.com"
               className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
-            <p className="mt-1 text-xs text-gray-500">
-              Jika diisi, akun temporary akan dibuat dan dikirim ke email vendor
+            <p className="mt-1 text-xs text-blue-600">
+              📧 Email ini akan digunakan untuk mengirim aktivasi akun vendor secara otomatis
             </p>
           </div>
           <div>
@@ -868,18 +860,19 @@ export default function CreateContractPage() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Email Vendor
+              Email Vendor <span className="text-red-500">*</span>
             </label>
             <input
               type="email"
               name="vendorEmail"
               value={formData.vendorEmail}
               onChange={handleChange}
+              required
               placeholder="vendor@example.com"
               className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
-            <p className="mt-1 text-xs text-gray-500">
-              Jika diisi, akun temporary akan dibuat dan dikirim ke email vendor
+            <p className="mt-1 text-xs text-blue-600">
+              📧 Email ini akan digunakan untuk mengirim aktivasi akun vendor secara otomatis
             </p>
           </div>
           <div>
@@ -1374,18 +1367,19 @@ export default function CreateContractPage() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Email Vendor
+              Email Vendor <span className="text-red-500">*</span>
             </label>
             <input
               type="email"
               name="vendorEmail"
               value={formData.vendorEmail}
               onChange={handleChange}
+              required
               placeholder="vendor@example.com"
               className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
-            <p className="mt-1 text-xs text-gray-500">
-              Jika diisi, akun temporary akan dibuat dan dikirim ke email vendor
+            <p className="mt-1 text-xs text-blue-600">
+              📧 Email ini akan digunakan untuk mengirim aktivasi akun vendor secara otomatis
             </p>
           </div>
         </div>
@@ -1755,6 +1749,25 @@ export default function CreateContractPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
             </svg>
             <p className="text-red-800 font-medium">{errorMessage}</p>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Success Alert */}
+      {successMessage && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-4 rounded-lg bg-green-50 border border-green-200"
+        >
+          <div className="flex items-start gap-3">
+            <svg className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div>
+              <p className="text-green-800 font-medium">{successMessage}</p>
+              <p className="text-green-600 text-sm mt-1">Anda akan dialihkan ke daftar kontrak dalam beberapa detik...</p>
+            </div>
           </div>
         </motion.div>
       )}

@@ -4,26 +4,29 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { useAuth, MOCK_USERS } from "@/lib/auth-new";
+import { useAuth } from "@/lib/auth-new";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login, isAuthenticated, isLoading } = useAuth();
+  const { user, login, isAuthenticated, isLoading } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [showDemo, setShowDemo] = useState(false);
 
   // Redirect if already authenticated
   useEffect(() => {
     // Only redirect after auth provider finished restoring state
-    if (!isLoading && isAuthenticated) {
-      router.push("/dashboard");
+    if (!isLoading && isAuthenticated && user) {
+      if (user.role === "vendor") {
+        router.push("/vendor");
+      } else {
+        router.push("/dashboard");
+      }
     }
-  }, [isAuthenticated, isLoading, router]);    
+  }, [isAuthenticated, isLoading, router, user]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,25 +47,6 @@ export default function LoginPage() {
     }
   };
 
-  const handleQuickLogin = async (userEmail: string) => {
-    setError("");
-    setEmail(userEmail);
-    setPassword("password123");
-    setLoading(true);
-
-    try {
-      const success = await login(userEmail, "password123");
-      if (!success) {
-        setError("Login gagal. Coba lagi.");
-      }
-      // useEffect will handle redirect when isAuthenticated becomes true
-    } catch (err) {
-      console.error("Login error:", err);
-      setError("Terjadi kesalahan");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-white via-blue-50 to-sky-100 p-4 relative overflow-hidden">
@@ -173,58 +157,6 @@ export default function LoginPage() {
             </button>
           </form>
 
-          {/* Quick Login for Demo */}
-          <div className="mt-8 pt-6 border-t border-gray-200">
-            <button
-              type="button"
-              onClick={() => setShowDemo(!showDemo)}
-              className="w-full flex items-center justify-center gap-2 text-sm font-semibold text-slate-600 mb-4 hover:text-blue-600 transition-colors"
-            >
-              <span>Demo Login (klik untuk masuk cepat)</span>
-              <svg
-                className={`w-4 h-4 transform transition-transform duration-200 ${showDemo ? 'rotate-180' : ''}`}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-
-            <AnimatePresence>
-              {showDemo && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="overflow-hidden"
-                >
-                  <div className="grid grid-cols-1 gap-2 pb-2">
-                    {MOCK_USERS.map((user) => (
-                      <button
-                        key={user.id}
-                        onClick={() => handleQuickLogin(user.email)}
-                        disabled={loading}
-                        className="flex items-center justify-between px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl hover:bg-blue-50 hover:border-blue-300 transition-all text-left disabled:opacity-50"
-                      >
-                        <div>
-                          <p className="text-sm font-semibold text-slate-800">{user.name}</p>
-                          <p className="text-xs text-slate-500">{user.email}</p>
-                        </div>
-                        <span className={`text-xs px-3 py-1.5 rounded-full font-semibold ${user.role === "admin" ? "bg-blue-100 text-blue-700 border border-blue-200" :
-                          user.role === "vendor" ? "bg-amber-100 text-amber-700 border border-amber-200" :
-                          "bg-emerald-100 text-emerald-700 border border-emerald-200"
-                          }`}>
-                          {user.role === "admin" ? "Admin" : user.role === "vendor" ? "Vendor" : "Viewer"}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
         </div>
 
         {/* Footer */}

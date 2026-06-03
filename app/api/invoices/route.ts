@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer } from '../../../lib/supabaseServer';
 
+export const dynamic = 'force-dynamic';
+
 // GET - Ambil semua invoices
 export async function GET() {
   try {
@@ -39,7 +41,7 @@ export async function POST(request: Request) {
       tanggal_arsip: body.tanggalArsip,
       no_xps: body.noXPS,
       tanggal_xps: body.tanggalXPS,
-      status: body.status || 'diajukan', // Default status saat membuat tagihan baru
+      status: body.status || 'dibayar', // Default status saat membuat tagihan baru
       tanggal_diajukan: body.tanggalDiajukan || new Date().toISOString(),
       keterangan: body.keterangan,
       diajukan_oleh: body.diajukanOleh,

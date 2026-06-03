@@ -1,123 +1,249 @@
-import { NextResponse } from 'next/server';
+import { NextResponse } from "next/server";
+import { supabaseServer } from "../../../lib/supabaseServer";
 
-// ============================================
-// API: VENDOR ACCOUNT MANAGEMENT
-// ============================================
-// Endpoints untuk mengelola akun vendor:
-// - GET: List all vendor accounts
-// - POST: Create vendor account (saat kontrak dibuat)
-// - PUT: Activate/Deactivate vendor account
-// - DELETE: Remove vendor account
+const VENDOR_ACCOUNTS_TABLE = "vendor_accounts";
+const CONTRACT_TABLES = [
+  "contract_investment",
+  "contract_maintenance",
+  "contract_administration",
+] as const;
 
-// GET: Fetch all vendor accounts
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function generateActivationToken(): string {
+  return crypto.randomUUID();
+}
+
+function generateTemporaryPassword(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$";
+  let password = "";
+  for (let i = 0; i < 12; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+}
+
+async function refreshExpiredAccounts() {
+  const today = new Date().toISOString().slice(0, 10);
+  await supabaseServer
+    .from(VENDOR_ACCOUNTS_TABLE)
+    .update({ is_active: false, updated_at: new Date().toISOString() })
+    .eq("is_active", true)
+    .lt("active_until", today);
+}
+
+async function buildContractCountMap(): Promise<Record<string, number>> {
+  const results = await Promise.all(
+    CONTRACT_TABLES.map((table) =>
+      supabaseServer.from(table).select("id,vendor_account_id")
+    )
+  );
+
+  const countMap: Record<string, number> = {};
+  results.forEach((res) => {
+    if (res.error || !res.data) return;
+    res.data.forEach((row) => {
+      if (!row.vendor_account_id) return;
+      countMap[row.vendor_account_id] = (countMap[row.vendor_account_id] || 0) + 1;
+    });
+  });
+
+  return countMap;
+}
+
+// GET: Fetch vendor accounts
 export async function GET(request: Request) {
   try {
-    const { searchParams } = new URL(request.url);
-    const contractId = searchParams.get('contractId');
-    const isActive = searchParams.get('isActive');
+    await refreshExpiredAccounts();
 
-    let accounts = getMockVendorAccounts();
+    const { searchParams } = new URL(request.url);
+    const contractId = searchParams.get("contractId");
+    const isActive = searchParams.get("isActive");
+    const email = searchParams.get("email");
+    const authUserId = searchParams.get("authUserId");
+
+    let query = supabaseServer.from(VENDOR_ACCOUNTS_TABLE).select("*");
+
+    if (email) query = query.eq("email", normalizeEmail(email));
+    if (authUserId) query = query.eq("auth_user_id", authUserId);
+    if (isActive !== null && isActive !== undefined) {
+      query = query.eq("is_active", isActive === "true");
+    }
+
+    const singleResult = Boolean(email || authUserId);
+    const { data, error } = singleResult
+      ? await query.maybeSingle()
+      : await query.order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error fetching vendor accounts:", error);
+      return NextResponse.json({ error: "Failed to fetch vendor accounts" }, { status: 500 });
+    }
+
+    if (singleResult) {
+      if (!data) {
+        return NextResponse.json({ data: null }, { status: 200 });
+      }
+      return NextResponse.json({
+        data: {
+          id: data.id,
+          authUserId: data.auth_user_id,
+          email: data.email,
+          vendorName: data.vendor_name,
+          vendorCompany: data.vendor_company,
+          isActive: data.is_active,
+          activatedAt: data.activated_at,
+          activeUntil: data.active_until,
+          activationToken: data.activation_token,
+          createdAt: data.created_at,
+          updatedAt: data.updated_at,
+        },
+      });
+    }
+
+    const countMap = await buildContractCountMap();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const accounts = (data || []).map((account: any) => ({
+      id: account.id,
+      authUserId: account.auth_user_id,
+      email: account.email,
+      vendorName: account.vendor_name,
+      vendorCompany: account.vendor_company,
+      isActive: account.is_active,
+      activatedAt: account.activated_at,
+      activeUntil: account.active_until,
+      createdAt: account.created_at,
+      updatedAt: account.updated_at,
+      contractCount: countMap[account.id] || 0,
+    }));
 
     if (contractId) {
-      accounts = accounts.filter(a => a.contractId === contractId);
-    }
-    if (isActive !== null && isActive !== undefined) {
-      accounts = accounts.filter(a => a.isActive === (isActive === 'true'));
+      // Filter by contractId if requested
+      const contractRows = await Promise.all(
+        CONTRACT_TABLES.map((table) =>
+          supabaseServer
+            .from(table)
+            .select("id,vendor_account_id")
+            .eq("id", contractId)
+            .maybeSingle()
+        )
+      );
+      const vendorAccountId = contractRows.find((r) => r.data?.vendor_account_id)?.data
+        ?.vendor_account_id;
+      const filtered = vendorAccountId
+        ? accounts.filter((a: { id: string }) => a.id === vendorAccountId)
+        : [];
+      return NextResponse.json({ data: filtered });
     }
 
     return NextResponse.json({ data: accounts });
   } catch (error) {
-    console.error('Error fetching vendor accounts:', error);
-    return NextResponse.json({ error: 'Failed to fetch vendor accounts' }, { status: 500 });
+    console.error("Error fetching vendor accounts:", error);
+    return NextResponse.json({ error: "Failed to fetch vendor accounts" }, { status: 500 });
   }
 }
 
-// POST: Create new vendor account
+// POST: Create new vendor account manually
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { 
-      email, 
-      vendorName, 
-      vendorCompany, 
-      contractId, 
-      contractTitle,
-      tanggalPerjanjian,
+    const {
+      email,
+      vendorName,
+      vendorCompany,
       tanggalBerakhir,
       sendEmail = true,
     } = body;
 
-    if (!email || !vendorName || !contractId || !tanggalBerakhir) {
+    if (!email || !vendorName || !tanggalBerakhir) {
       return NextResponse.json(
-        { error: 'Missing required fields: email, vendorName, contractId, tanggalBerakhir' },
+        { error: "Missing required fields: email, vendorName, tanggalBerakhir" },
         { status: 400 }
       );
     }
 
-    // Generate credentials
-    const username = `vendor.${vendorName.toLowerCase().replace(/\s+/g, '').slice(0, 10)}`;
-    const temporaryPassword = generatePassword();
+    const normalizedEmail = normalizeEmail(email);
+    const activationToken = generateActivationToken();
+    const activationExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const temporaryPassword = generateTemporaryPassword();
 
-    const newAccount = {
-      id: `VA-${Date.now()}`,
-      userId: `USR-VENDOR-${Date.now()}`,
-      username,
-      email,
-      vendorName,
-      vendorCompany: vendorCompany || '',
-      contractId,
-      isActive: false, // Requires admin activation
-      activatedAt: null,
-      expiresAt: tanggalBerakhir,
-      createdAt: new Date().toISOString(),
-    };
+    const authResult = await supabaseServer.auth.admin.createUser({
+      email: normalizedEmail,
+      password: temporaryPassword,
+      email_confirm: true,
+    });
 
-    // Send email if requested
+    if (authResult.error) {
+      return NextResponse.json({ error: authResult.error.message }, { status: 500 });
+    }
+
+    const { data, error } = await supabaseServer
+      .from(VENDOR_ACCOUNTS_TABLE)
+      .insert({
+        auth_user_id: authResult.data.user?.id || null,
+        email: normalizedEmail,
+        vendor_name: vendorName,
+        vendor_company: vendorCompany || null,
+        is_active: false,
+        active_until: tanggalBerakhir,
+        activation_token: activationToken,
+        activation_expires_at: activationExpiresAt,
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
     if (sendEmail) {
       try {
-        const emailResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/send-vendor-email`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+        await fetch(`${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/api/send-vendor-email`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            vendorEmail: email,
+            vendorEmail: normalizedEmail,
             vendorName,
             vendorCompany,
-            contractId,
-            contractTitle,
-            tanggalPerjanjian,
+            contractId: "-",
+            contractTitle: "-",
             tanggalBerakhir,
-            temporaryUsername: username,
+            activationToken,
             temporaryPassword,
           }),
         });
-
-        if (!emailResponse.ok) {
-          console.warn('Failed to send vendor email, but account was created');
-        }
       } catch (emailError) {
-        console.warn('Email sending failed:', emailError);
+        console.warn("Email sending failed:", emailError);
       }
     }
 
-    // In production, save to database
-    console.log('👤 Vendor account created:', newAccount);
-
-    return NextResponse.json({ 
+    return NextResponse.json({
       data: {
-        ...newAccount,
-        temporaryPassword, // Only returned once during creation
+        id: data.id,
+        authUserId: data.auth_user_id,
+        email: data.email,
+        vendorName: data.vendor_name,
+        vendorCompany: data.vendor_company,
+        isActive: data.is_active,
+        activeUntil: data.active_until,
+        activationToken: data.activation_token,
+        createdAt: data.created_at,
+        temporaryPassword,
       },
-      message: sendEmail 
-        ? `Akun vendor berhasil dibuat dan email dikirim ke ${email}` 
-        : 'Akun vendor berhasil dibuat',
+      message: sendEmail
+        ? `Akun vendor berhasil dibuat dan email dikirim ke ${normalizedEmail}`
+        : "Akun vendor berhasil dibuat",
     }, { status: 201 });
   } catch (error) {
-    console.error('Error creating vendor account:', error);
-    return NextResponse.json({ error: 'Failed to create vendor account' }, { status: 500 });
+    console.error("Error creating vendor account:", error);
+    return NextResponse.json({ error: "Failed to create vendor account" }, { status: 500 });
   }
 }
 
-// PUT: Activate/Deactivate/Update vendor account
+// PUT: Deactivate or extend vendor account
 export async function PUT(request: Request) {
   try {
     const body = await request.json();
@@ -125,104 +251,60 @@ export async function PUT(request: Request) {
 
     if (!id || !action) {
       return NextResponse.json(
-        { error: 'Missing required fields: id, action' },
+        { error: "Missing required fields: id, action" },
         { status: 400 }
       );
     }
 
-    const validActions = ['activate', 'deactivate', 'extend'];
+    const validActions = ["deactivate", "extend"];
     if (!validActions.includes(action)) {
       return NextResponse.json(
-        { error: `Invalid action. Must be one of: ${validActions.join(', ')}` },
+        { error: `Invalid action. Must be one of: ${validActions.join(", ")}` },
         { status: 400 }
       );
     }
 
-    let updatedAccount;
+    const updatePayload: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    };
 
-    switch (action) {
-      case 'activate':
-        updatedAccount = {
-          id,
-          isActive: true,
-          activatedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        break;
-      case 'deactivate':
-        updatedAccount = {
-          id,
-          isActive: false,
-          updatedAt: new Date().toISOString(),
-        };
-        break;
-      case 'extend':
-        if (!expiresAt) {
-          return NextResponse.json(
-            { error: 'expiresAt is required for extend action' },
-            { status: 400 }
-          );
-        }
-        updatedAccount = {
-          id,
-          expiresAt,
-          isActive: true, // Re-activate if extending
-          updatedAt: new Date().toISOString(),
-        };
-        break;
+    if (action === "deactivate") {
+      updatePayload.is_active = false;
     }
 
-    // In production, update in database
-    console.log('👤 Vendor account updated:', updatedAccount);
+    if (action === "extend") {
+      if (!expiresAt) {
+        return NextResponse.json(
+          { error: "expiresAt is required for extend action" },
+          { status: 400 }
+        );
+      }
+      updatePayload.active_until = expiresAt;
+      updatePayload.is_active = true;
+    }
 
-    return NextResponse.json({ 
-      data: updatedAccount,
+    const { data, error } = await supabaseServer
+      .from(VENDOR_ACCOUNTS_TABLE)
+      .update(updatePayload)
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({
+      data: {
+        id: data.id,
+        isActive: data.is_active,
+        activeUntil: data.active_until,
+        updatedAt: data.updated_at,
+      },
       message: `Akun vendor berhasil di-${action}`,
     });
   } catch (error) {
-    console.error('Error updating vendor account:', error);
-    return NextResponse.json({ error: 'Failed to update vendor account' }, { status: 500 });
+    console.error("Error updating vendor account:", error);
+    return NextResponse.json({ error: "Failed to update vendor account" }, { status: 500 });
   }
-}
-
-// Helper: Generate password
-function generatePassword(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$';
-  let password = '';
-  for (let i = 0; i < 12; i++) {
-    password += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return password;
-}
-
-// Mock data
-function getMockVendorAccounts() {
-  return [
-    {
-      id: 'VA-001',
-      userId: 'USR-VENDOR-001',
-      username: 'vendor.wijaya',
-      email: 'andi.pratama@wijayakarya.co.id',
-      vendorName: 'Andi Pratama',
-      vendorCompany: 'PT Wijaya Karya',
-      contractId: 'CTR-001',
-      isActive: true,
-      activatedAt: '2025-03-15T10:00:00Z',
-      expiresAt: '2026-06-30',
-      createdAt: '2025-03-15T08:00:00Z',
-    },
-    {
-      id: 'VA-002',
-      userId: 'USR-VENDOR-002',
-      username: 'vendor.hutama',
-      email: 'budi.setiawan@hutamakarya.co.id',
-      vendorName: 'Budi Setiawan',
-      vendorCompany: 'PT Hutama Karya',
-      contractId: 'CTR-002',
-      isActive: false,
-      activatedAt: null,
-      expiresAt: '2026-07-30',
-      createdAt: '2025-04-01T08:00:00Z',
-    },
-  ];
 }

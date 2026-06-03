@@ -21,19 +21,6 @@ const CONTRACT_CATEGORY_COLORS: Record<string, string> = {
   administrasi: "#0ea5e9",   // sky blue
 };
 
-// Warna untuk kategori langganan
-const SUBSCRIPTION_CATEGORY_COLORS: Record<string, string> = {
-  utilitas: "#3b82f6",       // blue
-  software: "#a855f7",       // purple
-  jasa: "#06b6d4",           // cyan
-  perlengkapan: "#f59e0b",   // amber
-  properti: "#6366f1",       // indigo
-  transportasi: "#f97316",   // orange
-  karyawan: "#10b981",       // emerald
-  pemasaran: "#ec4899",      // pink
-  lainnya: "#6b7280",        // gray
-};
-
 interface ContractCategoryData {
   kategori: string;
   label: string;
@@ -45,19 +32,8 @@ interface ContractCategoryData {
   persentaseRealisasi: number;
 }
 
-interface SubscriptionCategoryData {
-  kategori: string;
-  label: string;
-  totalSubs: number;
-  activeSubs: number;
-  totalAnggaranBulanan: number;
-  totalTerbayar: number;
-  avgProgress: number;
-}
-
 interface CategoryBarChartsProps {
   contractData: ContractCategoryData[];
-  subscriptionData: SubscriptionCategoryData[];
 }
 
 // Custom tooltip untuk kontrak - professional styling for light/dark mode
@@ -112,7 +88,7 @@ const CustomLegend = ({ payload }: any) => {
   );
 };
 
-export function CategoryBarCharts({ contractData, subscriptionData }: CategoryBarChartsProps) {
+export function CategoryBarCharts({ contractData }: CategoryBarChartsProps) {
   // Transform data untuk kontrak chart
   const contractChartData = contractData.map((cat) => ({
     name: cat.label,
@@ -210,4 +186,4 @@ export function CategoryBarCharts({ contractData, subscriptionData }: CategoryBa
 }
 
 // Export konstanta warna untuk digunakan di PDF dan komponen lain
-export { CONTRACT_CATEGORY_COLORS, SUBSCRIPTION_CATEGORY_COLORS };
+export { CONTRACT_CATEGORY_COLORS };

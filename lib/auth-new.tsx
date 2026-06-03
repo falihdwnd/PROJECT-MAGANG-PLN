@@ -7,6 +7,7 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from "react";
 import type { User, UserRole } from "./types-new";
+import { supabase } from "./supabaseClient";
 
 // Storage key for persisting auth state
 const AUTH_STORAGE_KEY = "simap_auth_user";
@@ -79,44 +80,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ],
 };
 
-// ============================================
-// MOCK USERS
-// ============================================
 
-export const MOCK_USERS: User[] = [
-  {
-    id: "USR-001",
-    username: "admin",
-    name: "Ferza Farrell Wibowo",
-    email: "frzfarrell@pln.co.id",
-    role: "admin",
-    unit: "PLN Pusat",
-    createdAt: "2025-01-01",
-  },
-  {
-    id: "USR-003",
-    username: "manajer",
-    name: "Falih Akmal Dewanda",
-    email: "falih@pln.co.id",
-    role: "viewer",
-    unit: "PLN Pusat",
-    createdAt: "2025-01-01",
-  },
-  {
-    id: "USR-VENDOR-001",
-    username: "vendor.wijaya",
-    name: "Andi Pratama",
-    email: "andi.pratama@wijayakarya.co.id",
-    role: "vendor",
-    unit: "PT Wijaya Karya",
-    createdAt: "2025-03-15",
-    contractId: "CTR-001",
-    vendorCompany: "PT Wijaya Karya",
-    isActive: true,
-    activatedAt: "2025-03-15",
-    expiresAt: "2026-06-30",
-  },
-];
 
 // Role labels untuk display
 export const ROLE_LABELS: Record<UserRole, string> = {
@@ -213,22 +177,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Restore auth state from localStorage on mount
+  // Restore auth state from Supabase on mount
   useEffect(() => {
-    const storedUser = getStoredUser();
-    if (storedUser) {
-      // Verify the stored user still exists in our mock users
-      const validUser = MOCK_USERS.find((u) => u.id === storedUser.id);
-      if (validUser) {
-        setUser(validUser);
-        // Refresh session expiry on page load (if still valid)
-        refreshSessionExpiry();
-      } else {
-        // Clear invalid stored user
-        storeUser(null);
+    const initializeAuth = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          // Fetch user profile from API
+          const res = await fetch(`/api/auth/me?authUserId=${session.user.id}`);
+          if (res.ok) {
+            const { user: userData } = await res.json();
+            setUser(userData);
+            storeUser(userData);
+            refreshSessionExpiry();
+          } else {
+            // Profile fetch failed (maybe not found), log out
+            await supabase.auth.signOut();
+            setUser(null);
+            storeUser(null);
+          }
+        } else {
+          setUser(null);
+          storeUser(null);
+        }
+      } catch (error) {
+        console.error("Auth initialization error:", error);
+        setUser(null);
+      } finally {
+        setIsLoading(false);
       }
-    }
-    setIsLoading(false);
+    };
+
+    initializeAuth();
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_OUT') {
+        setUser(null);
+        storeUser(null);
+      } else if (event === 'SIGNED_IN' && session?.user) {
+        // Handled in login(), but we can also fetch here if needed
+        // For now, let login() handle the profile fetch to avoid double fetching
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Set up activity listeners to refresh session on user interaction
@@ -263,37 +258,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   const login = useCallback(async (usernameOrEmail: string, password: string): Promise<boolean> => {
-    // Simulate API call delay
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    try {
+      // Always login via Supabase Auth
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: usernameOrEmail,
+        password,
+      });
 
-    const id = usernameOrEmail.trim().toLowerCase();
-
-    // Find user by username OR email (password check is dummy)
-    const foundUser = MOCK_USERS.find(
-      (u) => u.username.toLowerCase() === id || u.email.toLowerCase() === id
-    );
-
-    if (foundUser && password === "password123") {
-      // Check vendor account activation and expiry
-      if (foundUser.role === "vendor") {
-        if (!foundUser.isActive) {
-          return false; // Account not activated
-        }
-        if (foundUser.expiresAt && new Date(foundUser.expiresAt) < new Date()) {
-          return false; // Account expired
-        }
+      if (error || !data.user) {
+        return false;
       }
-      setUser(foundUser);
-      storeUser(foundUser); // Persist to localStorage
-      return true;
-    }
 
-    return false;
+      // Fetch user profile based on role
+      const res = await fetch(`/api/auth/me?authUserId=${data.user.id}`);
+      if (!res.ok) {
+        await supabase.auth.signOut();
+        return false;
+      }
+
+      const { user: profileData } = await res.json();
+      
+      setUser(profileData);
+      storeUser(profileData); // Persist to localStorage
+      refreshSessionExpiry();
+      return true;
+    } catch (error) {
+      console.error("Login error:", error);
+      await supabase.auth.signOut();
+      return false;
+    }
   }, []);
 
   const logout = useCallback(() => {
     setUser(null);
     storeUser(null); // Clear from localStorage
+    supabase.auth.signOut().catch((error) => {
+      console.warn("Supabase signOut failed:", error);
+    });
   }, []);
 
   const hasPermission = useCallback(

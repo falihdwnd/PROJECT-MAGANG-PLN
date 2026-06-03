@@ -82,15 +82,24 @@ export default function KontrakTabbedPage() {
   // Check if any filter is active
   const isFilterActive = search !== "" || status !== "all";
 
+  const contractList = useMemo(() => {
+    if (user?.role !== "vendor") return contracts || [];
+    return (contracts || []).filter((c) => {
+      if (user.vendorAccountId) {
+        return c.vendorAccountId === user.vendorAccountId;
+      }
+      return c.vendorEmail?.toLowerCase() === user.email.toLowerCase();
+    });
+  }, [contracts, user]);
+
   // Group contracts by category
   const contractsByCategory = useMemo(() => {
-    const contractList = contracts || [];
     return {
       investasi: contractList.filter((c) => c.kategori === "investasi"),
       pemeliharaan: contractList.filter((c) => c.kategori === "pemeliharaan"),
       administrasi: contractList.filter((c) => c.kategori === "administrasi"),
     };
-  }, [contracts]);
+  }, [contractList]);
 
   // Filter contracts for active tab
   const filteredContracts = useMemo(() => {
@@ -137,13 +146,13 @@ export default function KontrakTabbedPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Daftar Kontrak</h1>
           <p className="text-sm text-gray-500">
-            Total {contracts.length} kontrak
+            Total {contractList.length} kontrak
           </p>
         </div>
         <div className="flex items-center gap-3">
           <button
             onClick={handleExportExcel}
-            disabled={isExporting || contracts.length === 0}
+            disabled={isExporting || contractList.length === 0 || user?.role === "vendor"}
             className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isExporting ? (

@@ -6,7 +6,6 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, ROLE_LABELS, ROLE_COLORS } from "@/lib/auth-new";
-import { NotificationDropdown } from "./notification-dropdown";
 
 interface NavItem {
   name: string;
@@ -39,15 +38,6 @@ const navigation: NavItem[] = [
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
-      </svg>
-    ),
-  },
-  {
-    name: "Langganan",
-    href: "/pembayaran",
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
       </svg>
     ),
   },
@@ -157,7 +147,7 @@ export function SidebarLayout({ children }: { children: ReactNode }) {
       >
         {/* Logo */}
         <div className="h-16 flex items-center justify-between px-4 border-b border-transparent">
-          <Link href="/dashboard" className="flex items-center gap-3 hover:!bg-transparent">
+          <Link href={user?.role === "vendor" ? "/vendor" : "/dashboard"} className="flex items-center gap-3 hover:!bg-transparent">
             <Image
               src="/Logo_PLNb.svg"
               alt="Logo PLN"
@@ -297,9 +287,6 @@ export function SidebarLayout({ children }: { children: ReactNode }) {
 
             {/* Right side */}
             <div className="flex items-center gap-2">
-              {/* Notifications */}
-              <NotificationDropdown />
-
               {/* User menu */}
               <div className="relative">
                 <button

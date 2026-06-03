@@ -2,6 +2,157 @@ import { NextResponse } from 'next/server';
 import { supabaseServer } from '../../../lib/supabaseServer';
 import { calculateContractStatus } from '../../../lib/contract-status';
 
+const VENDOR_ACCOUNTS_TABLE = 'vendor_accounts';
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function generateActivationToken(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback if crypto is not available
+  return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+}
+
+function generateTemporaryPassword(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$';
+  let password = '';
+  for (let i = 0; i < 12; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+}
+
+async function upsertVendorAccount(params: {
+  email: string;
+  vendorName?: string;
+  vendorCompany?: string;
+  activeUntil?: string;
+}) {
+  const normalizedEmail = normalizeEmail(params.email);
+  const { data: existing, error } = await supabaseServer
+    .from(VENDOR_ACCOUNTS_TABLE)
+    .select('*')
+    .eq('email', normalizedEmail)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  const activationExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  let activationToken: string | null = null;
+  let temporaryPassword: string | null = null;
+  let authUserId: string | null = existing?.auth_user_id || null;
+
+  if (!existing) {
+    temporaryPassword = generateTemporaryPassword();
+    const authResult = await supabaseServer.auth.admin.createUser({
+      email: normalizedEmail,
+      password: temporaryPassword,
+      email_confirm: true,
+    });
+
+    if (authResult.error) {
+      throw authResult.error;
+    }
+
+    authUserId = authResult.data.user?.id || null;
+    activationToken = generateActivationToken();
+
+    const { data: inserted, error: insertError } = await supabaseServer
+      .from(VENDOR_ACCOUNTS_TABLE)
+      .insert({
+        auth_user_id: authUserId,
+        email: normalizedEmail,
+        vendor_name: params.vendorName || null,
+        vendor_company: params.vendorCompany || null,
+        is_active: false,
+        active_until: params.activeUntil || null,
+        activation_token: activationToken,
+        activation_expires_at: activationExpiresAt,
+      })
+      .select('*')
+      .single();
+
+    if (insertError) {
+      throw insertError;
+    }
+
+    return {
+      vendorAccountId: inserted.id as string,
+      activationToken,
+      temporaryPassword,
+      vendorName: inserted.vendor_name as string | null,
+      vendorCompany: inserted.vendor_company as string | null,
+    };
+  }
+
+  const updatePayload: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+
+  if (params.vendorName && !existing.vendor_name) {
+    updatePayload.vendor_name = params.vendorName;
+  }
+  if (params.vendorCompany && !existing.vendor_company) {
+    updatePayload.vendor_company = params.vendorCompany;
+  }
+
+  if (params.activeUntil) {
+    const currentActiveUntil = existing.active_until ? new Date(existing.active_until) : null;
+    const nextActiveUntil = new Date(params.activeUntil);
+    if (!currentActiveUntil || nextActiveUntil > currentActiveUntil) {
+      updatePayload.active_until = params.activeUntil;
+    }
+  }
+
+  if (!authUserId) {
+    temporaryPassword = generateTemporaryPassword();
+    const authResult = await supabaseServer.auth.admin.createUser({
+      email: normalizedEmail,
+      password: temporaryPassword,
+      email_confirm: true,
+    });
+
+    if (authResult.error) {
+      throw authResult.error;
+    }
+
+    authUserId = authResult.data.user?.id || null;
+    updatePayload.auth_user_id = authUserId;
+  }
+
+  const now = new Date();
+  const existingExpiry = existing.activation_expires_at ? new Date(existing.activation_expires_at) : null;
+  if (!existing.is_active && (!existing.activation_token || (existingExpiry && existingExpiry < now))) {
+    activationToken = generateActivationToken();
+    updatePayload.activation_token = activationToken;
+    updatePayload.activation_expires_at = activationExpiresAt;
+  }
+
+  if (Object.keys(updatePayload).length > 1) {
+    const { error: updateError } = await supabaseServer
+      .from(VENDOR_ACCOUNTS_TABLE)
+      .update(updatePayload)
+      .eq('id', existing.id);
+
+    if (updateError) {
+      throw updateError;
+    }
+  }
+
+  return {
+    vendorAccountId: existing.id as string,
+    activationToken,
+    temporaryPassword,
+    vendorName: (existing.vendor_name as string | null) || params.vendorName || null,
+    vendorCompany: (existing.vendor_company as string | null) || params.vendorCompany || null,
+  };
+}
+
 // Table names for split contracts
 const TABLES = {
   investment: 'contract_investment',
@@ -42,6 +193,8 @@ function mapInvestmentContract(row: any) {
     nilaiPerjanjian: row.nilai_perjanjian || 0,
     nilaiTagihan: row.nilai_tagihan || 0,
     namaVendor: row.nama_vendor,
+    vendorEmail: row.vendor_email,
+    vendorAccountId: row.vendor_account_id,
     terbayar: row.terbayar || 0,
     totalTagihanDibayar: row.terbayar || 0,
     sisaAnggaran: row.sisa_anggaran || (row.nilai_perjanjian - (row.terbayar || 0)),
@@ -125,6 +278,8 @@ function mapMaintenanceContract(row: any) {
     judulPerjanjian: row.judul_perjanjian,
     nilaiPerjanjian: nilaiPerjanjian,
     namaVendor: row.nama_vendor,
+    vendorEmail: row.vendor_email,
+    vendorAccountId: row.vendor_account_id,
     nilaiTagihanSTIPusat: nilaiTagihanSTIPusat,
     nilaiTagihanUnitInduk: nilaiTagihanUnitInduk,
     noBeritaAcara: row.no_berita_acara,
@@ -211,6 +366,8 @@ function mapAdministrationContract(row: any) {
     
     // 7. Nama Vendor
     namaVendor: row.nama_vendor,
+    vendorEmail: row.vendor_email,
+    vendorAccountId: row.vendor_account_id,
     
     // 8. Nilai Tagihan Keseluruhan
     nilaiTagihanKeseluruhan: nilaiTagihanKeseluruhan,
@@ -385,9 +542,9 @@ export async function GET(request: Request) {
     ];
 
     return NextResponse.json({ data: allContracts }, { status: 200 });
-  } catch (error: unknown) {
+  } catch (error: any) {
     console.error('Server error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: error?.message || String(error) || 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -421,6 +578,22 @@ export async function POST(request: Request) {
     }
 
     let contractData: Record<string, unknown>;
+    let vendorAccountId: string | null = null;
+    let activationToken: string | null = null;
+    let temporaryPassword: string | null = null;
+
+    if (body.vendorEmail) {
+      const vendorAccount = await upsertVendorAccount({
+        email: body.vendorEmail,
+        vendorName: body.namaVendor || body.vendor,
+        vendorCompany: body.namaVendor || body.vendor,
+        activeUntil: body.tanggalBerakhir,
+      });
+
+      vendorAccountId = vendorAccount.vendorAccountId;
+      activationToken = vendorAccount.activationToken;
+      temporaryPassword = vendorAccount.temporaryPassword;
+    }
 
     if (kategori === 'investasi') {
       // Investment contract data mapping
@@ -435,7 +608,8 @@ export async function POST(request: Request) {
         nilai_tagihan: body.nilaiTagihan || 0,
         terbayar: body.terbayar || 0,
         nama_vendor: body.namaVendor || body.vendor,
-          vendor_email: body.vendorEmail,
+        vendor_email: body.vendorEmail,
+        vendor_account_id: vendorAccountId,
         jenis_ai: body.jenisAI || body.jenisAnggaran || 'AI',
         cr_not_cr: body.crNotCR || 'Not CR',
         status: body.status || 'aktif',
@@ -465,7 +639,8 @@ export async function POST(request: Request) {
         nilai_tagihan: body.nilaiTagihan || 0,
         total_tagihan_dibayar: 0,
         vendor: body.vendor,
-          vendor_email: body.vendorEmail,
+        vendor_email: body.vendorEmail,
+        vendor_account_id: vendorAccountId,
         status: body.status || 'aktif',
         jenis_anggaran: body.jenisAnggaran || 'AO',
         unit: body.unit,
@@ -512,20 +687,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: insertResult.error.message }, { status: 500 });
     }
 
-    // --- MOCK VENDOR ACCOUNT CREATION & EMAIL ---
-    if (body.vendorEmail) {
-      console.log("======================================");
-      console.log("[MOCK LOGIC] Mendaftarkan Akun Vendor:", body.vendorEmail);
-      console.log("Role: vendor, Aktif sampai: ", body.tanggalBerakhir);
-      console.log("Mengirim Email ke:", body.vendorEmail);
-      console.log("Isi Email: Halo ", body.namaVendor || body.vendor, " ini adalah link login sementara Anda...");
-      console.log("======================================");
+    if (body.vendorEmail && activationToken) {
+      try {
+        const { sendVendorActivationEmail } = await import('../../../lib/email');
+        await sendVendorActivationEmail({
+          vendorEmail: body.vendorEmail,
+          vendorName: body.namaVendor || body.vendor,
+          vendorCompany: body.namaVendor || body.vendor,
+          contractId: insertResult.data?.id,
+          contractTitle: body.judulPRK || body.judulPerjanjian || body.namaPekerjaan,
+          tanggalPerjanjian: body.tanggalPerjanjian,
+          tanggalBerakhir: body.tanggalBerakhir,
+          username: `vendor.${(body.namaVendor || body.vendor).toLowerCase().replace(/\s+/g, '').slice(0, 10)}`,
+          password: temporaryPassword || undefined,
+          activationToken: activationToken,
+        });
+      } catch (emailError) {
+        console.warn('Failed to send vendor activation email:', emailError);
+      }
     }
-    // --------------------------------------------
     return NextResponse.json({ data: insertResult.data }, { status: 201 });
-  } catch (error: unknown) {
+  } catch (error: any) {
     console.error('Server error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: error?.message || String(error) || 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -568,9 +752,9 @@ export async function PUT(request: Request) {
     }
 
     return NextResponse.json({ data }, { status: 200 });
-  } catch (error: unknown) {
+  } catch (error: any) {
     console.error('Server error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: error?.message || String(error) || 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -605,8 +789,8 @@ export async function DELETE(request: Request) {
     }
 
     return NextResponse.json({ success: true }, { status: 200 });
-  } catch (error: unknown) {
+  } catch (error: any) {
     console.error('Server error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: error?.message || String(error) || 'Internal server error' }, { status: 500 });
   }
 }

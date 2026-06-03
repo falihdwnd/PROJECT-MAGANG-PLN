@@ -6,29 +6,10 @@ import { useContractStore, CONTRACT_CATEGORY_LABELS } from "@/lib/store-new";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ContractCategory } from "@/lib/types-new";
-import { getSubscriptions } from "@/lib/subscription-service";
-import {
-  SubscriptionWithPayments,
-  CATEGORY_LABELS as SUB_CATEGORY_LABELS,
-  CATEGORY_COLORS as SUB_CATEGORY_COLORS,
-  SubscriptionCategory
-} from "@/lib/subscription-types";
 import { CategoryBarCharts } from "@/components/laporan/category-bar-charts";
-import SubscriptionBarChart from "@/components/laporan/subscription-bar-chart";
 import { exportLaporanPDF } from "@/lib/export-pdf";
 
-// Dot colors for light mode visibility (darker shades)
-const SUB_CATEGORY_DOT_COLORS: Record<SubscriptionCategory, string> = {
-  utilitas: "bg-blue-500",
-  software: "bg-purple-500",
-  jasa: "bg-cyan-500",
-  perlengkapan: "bg-amber-500",
-  properti: "bg-indigo-500",
-  transportasi: "bg-orange-500",
-  karyawan: "bg-emerald-500",
-  pemasaran: "bg-pink-500",
-  lainnya: "bg-gray-500",
-};
+
 
 function formatCurrency(value: number): string {
   if (value >= 1000000000) return `Rp ${(value / 1000000000).toFixed(2)} M`;
@@ -41,23 +22,7 @@ export default function LaporanPage() {
   const { contracts, invoices, getDashboardSummary } = useContractStore();
   const summary = useMemo(() => getDashboardSummary(), [getDashboardSummary]);
 
-  // Subscription State
-  const [subscriptions, setSubscriptions] = useState<SubscriptionWithPayments[]>([]);
-  const [subsLoading, setSubsLoading] = useState(true);
 
-  useEffect(() => {
-    async function fetchSubs() {
-      try {
-        const data = await getSubscriptions();
-        setSubscriptions(data);
-      } catch (err) {
-        console.error("Error loading subscriptions:", err);
-      } finally {
-        setSubsLoading(false);
-      }
-    }
-    fetchSubs();
-  }, []);
 
   const categoryStats = useMemo(() => {
     const categories: ContractCategory[] = ["investasi", "pemeliharaan", "administrasi"];
@@ -73,8 +38,7 @@ export default function LaporanPage() {
       const totalDibayar = catContracts.reduce((sum, c) => sum + c.totalTagihanDibayar, 0);
       const totalTagihan = catInvoices.length;
       const tagihanDibayar = catInvoices.filter((i) => i.status === "dibayar").length;
-      const tagihanPending = catInvoices.filter((i) => i.status === "diajukan" || i.status === "diterima").length;
-
+      const tagihanPending = 0; // Removed pending status
       return {
         kategori: cat,
         label: CONTRACT_CATEGORY_LABELS[cat],
@@ -100,56 +64,8 @@ export default function LaporanPage() {
     persentaseRealisasi: summary.persentaseRealisasiGlobal,
     totalTagihan: invoices.length,
     tagihanDibayar: summary.tagihanDibayar,
-    tagihanPending: summary.tagihanDiajukan + summary.tagihanDiterima,
+    tagihanPending: 0, // Removed pending status
   }), [contracts, invoices, summary]);
-
-  // Subscription Stats Calculation
-  const subscriptionStats = useMemo(() => {
-    const categories = Array.from(new Set(subscriptions.map(s => s.kategori))) as SubscriptionCategory[];
-
-    const stats = categories.map(cat => {
-      const catSubs = subscriptions.filter(s => s.kategori === cat);
-
-      // Calculate total annualized budget (assuming anggaran_per_bulan * 12 is the contract value equivalent)
-      // Or we can just use total_terbayar vs total_bulan_belum_bayar * anggaran
-      const totalAnggaranBulanan = catSubs.reduce((sum, s) => sum + s.anggaran_per_bulan, 0);
-
-      // Actual payments made
-      const totalTerbayar = catSubs.reduce((sum, s) => sum + s.total_terbayar, 0);
-
-      // Potential total for the year (this is tricky as periods vary, but let's stick to what we can calculate)
-      // Let's use: Total Terbayar vs Total Seharusnya (Paid + Unpaid in current period maybe?)
-      // For now, let's just show Total Terbayar and Total Subscriptions
-
-      const totalSubs = catSubs.length;
-      const activeSubs = catSubs.filter(s => s.status === 'aktif').length;
-      const hasGaps = catSubs.filter(s => s.has_gaps).length;
-
-      return {
-        kategori: cat,
-        label: SUB_CATEGORY_LABELS[cat] || cat,
-        totalSubs,
-        activeSubs,
-        hasGaps,
-        totalAnggaranBulanan,
-        totalTerbayar,
-        // Calculate average progress if needed
-        avgProgress: catSubs.reduce((sum, s) => sum + s.paid_percentage, 0) / (totalSubs || 1)
-      };
-    });
-
-    // Provide a sorted or complete list if needed, for now just what exists
-    return stats.sort((a, b) => b.totalTerbayar - a.totalTerbayar);
-  }, [subscriptions]);
-
-  const overallSubStats = useMemo(() => {
-    return {
-      totalSubs: subscriptions.length,
-      activeSubs: subscriptions.filter(s => s.status === 'aktif').length,
-      totalTerbayar: subscriptions.reduce((sum, s) => sum + s.total_terbayar, 0),
-      totalGaps: subscriptions.filter(s => s.has_gaps).length
-    };
-  }, [subscriptions]);
 
   const handleExport = () => {
     // Generate CSV content
@@ -185,8 +101,15 @@ export default function LaporanPage() {
     exportLaporanPDF({
       contractStats: categoryStats,
       overallContractStats: overallStats,
-      subscriptionStats: subscriptionStats,
-      overallSubStats: overallSubStats,
+      contracts: contracts.map(c => ({
+        noPerjanjian: c.noPerjanjian || "-",
+        judulPekerjaan: c.judulPekerjaan || c.judulPerjanjian || c.namaPekerjaan || "-",
+        vendor: c.vendor || c.namaVendor || "-",
+        nilaiKontrak: c.nilaiKontrak || 0,
+        totalTagihanDibayar: c.totalTagihanDibayar || 0,
+        kategori: c.kategori,
+        status: c.status
+      }))
     });
   };
 
@@ -253,7 +176,6 @@ export default function LaporanPage() {
         >
           <CategoryBarCharts 
             contractData={categoryStats}
-            subscriptionData={subscriptionStats}
           />
         </motion.div>
 
@@ -404,145 +326,6 @@ export default function LaporanPage() {
             </table>
           </div>
         </motion.div>
-      </div>
-
-      {/* SECTION 2: LANGGANAN */}
-      <div className="space-y-6 pt-6 border-t border-gray-200">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900">Laporan Langganan</h2>
-            <p className="text-sm text-gray-600">
-              Ringkasan data langganan rutin dan pembayaran
-            </p>
-          </div>
-        </div>
-
-        {subsLoading ? (
-          <div className="flex items-center justify-center min-h-[200px]">
-            <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-          </div>
-        ) : (
-          <>
-            {/* Subscription Summary */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-gradient-to-r from-emerald-600 to-emerald-700 rounded-xl p-6 text-white"
-            >
-              <h3 className="text-lg font-semibold mb-4 !text-white">Ringkasan Langganan</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                <div>
-                  <p className="!text-emerald-100 text-sm">Total Langganan</p>
-                  <p className="text-2xl font-bold !text-white">{overallSubStats.totalSubs}</p>
-                  <p className="!text-emerald-100 text-xs">{overallSubStats.activeSubs} aktif</p>
-                </div>
-                <div>
-                  <p className="!text-emerald-100 text-sm">Status Pembayaran</p>
-                  <p className="text-2xl font-bold !text-white">{overallSubStats.totalGaps > 0 ? `${overallSubStats.totalGaps} Perlu Perhatian` : "Aman"}</p>
-                  <p className="!text-emerald-100 text-xs text-wrap">{overallSubStats.totalGaps > 0 ? "Ada bulan terlewat" : "Tidak ada gap"}</p>
-                </div>
-                <div>
-                  <p className="!text-emerald-100 text-sm">Total Terbayar</p>
-                  <p className="text-2xl font-bold !text-white">{formatCurrency(overallSubStats.totalTerbayar)}</p>
-                </div>
-                <div>
-                  {/* Placeholder for future metric */}
-                  <p className="!text-emerald-100 text-sm">Rata-rata Progress</p>
-                  <p className="text-2xl font-bold !text-white">
-                    {subscriptions.length > 0 ? (subscriptions.reduce((sum, s) => sum + s.paid_percentage, 0) / subscriptions.length).toFixed(0) : 0}%
-                  </p>
-                  <p className="!text-emerald-100 text-xs">Kelengkapan data</p>
-                </div>
-              </div>
-            </motion.div>
-            {/* Subscription Chart (Langganan per Kategori) */}
-            <div className="pt-6">
-              <SubscriptionBarChart subscriptionData={subscriptionStats} />
-            </div>
-
-            {/* Subscription Detail Table */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
-              className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden"
-            >
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-900">Detail Langganan per Kategori</h3>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[700px]">
-                  <thead className="bg-gray-50">
-                    <tr className="text-xs font-medium text-gray-600 uppercase tracking-wider">
-                      <th className="px-4 py-3 text-center">Kategori</th>
-                      <th className="px-4 py-3 text-center">Jml Langganan</th>
-                      <th className="px-4 py-3 text-center">Aktif</th>
-                      <th className="px-4 py-3 text-center">Anggaran / Bulan</th>
-                      <th className="px-4 py-3 text-center">Total Terbayar (Semua Tahun)</th>
-                      <th className="px-4 py-3 text-center">Progress Rata-rata</th>
-                      <th className="px-4 py-3 text-center">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200 text-sm">
-                    {subscriptionStats.length > 0 ? subscriptionStats.map((stat) => (
-                      <tr key={stat.kategori} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
-                          <div className="flex items-center gap-2">
-                            <span className={`w-2 h-2 rounded-full ${SUB_CATEGORY_DOT_COLORS[stat.kategori] || "bg-gray-500"}`} />
-                            {stat.label}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-center text-gray-600">{stat.totalSubs}</td>
-                        <td className="px-4 py-3 text-center text-gray-600">{stat.activeSubs}</td>
-                        <td className="px-4 py-3 text-center font-medium text-gray-900">{formatCurrency(stat.totalAnggaranBulanan)}</td>
-                        <td className="px-4 py-3 text-center text-green-600 font-medium">{formatCurrency(stat.totalTerbayar)}</td>
-                        <td className="px-4 py-3 text-center align-middle">
-                          <div className="flex items-center justify-center gap-2">
-                            <div className="w-28 h-2 bg-gray-200 rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-emerald-500 transition-all"
-                                style={{ width: `${Math.max(0, Math.min(100, stat.avgProgress))}%` }}
-                              />
-                            </div>
-                            <span className="text-xs text-gray-600">{stat.avgProgress.toFixed(0)}%</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-center align-middle">
-                          {stat.hasGaps > 0 ? (
-                            <div className="flex items-center justify-center">
-                              <button
-                                onClick={() => router.push(`/pembayaran?kategori=${stat.kategori}&status=hasGaps`)}
-                                className="mx-auto inline-flex items-center justify-center cursor-pointer hover:scale-110 transition-transform"
-                                title={`${stat.hasGaps} langganan perlu perhatian - Klik untuk melihat detail`}
-                                aria-label={`Lihat langganan ${stat.label} yang perlu perhatian`}
-                              >
-                                <svg className="block w-5 h-5 text-amber-500 hover:text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                </svg>
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="flex items-center justify-center mx-auto" title="Semua langganan aman" aria-hidden>
-                              <svg className="block w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                              </svg>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    )) : (
-                      <tr>
-                        <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
-                          Belum ada data langganan
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </motion.div>
-          </>
-        )}
       </div>
     </div>
   );
